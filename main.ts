@@ -2688,7 +2688,7 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
     if (url.pathname === "/stats") return Response.json(matchmaking.getStats());
     if (url.pathname === "/health") return new Response("OK", { status: 200 });
 
-    if (url.pathname === "/" || url.pathname === "/index.html") {
+    if ((url.pathname === "/" || url.pathname === "/index.html") && req.headers.get("upgrade") !== "websocket") {
         try {
             const html = await Deno.readFile("index.html");
             return new Response(html, {
