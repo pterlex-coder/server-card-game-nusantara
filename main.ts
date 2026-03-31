@@ -1,0 +1,3267 @@
+// ================================================
+// CARD GAME NUSANTARA - FULL SERVER v2
+// main.ts - COMPLETE VERSION WITH ALL FIXES
+// ================================================
+
+// Deno global type declaration (for non-Deno IDE/LSP compatibility)
+declare const Deno: {
+    env: { get(key: string): string | undefined };
+    serve(options: { port: number }, handler: (req: Request) => Response | Promise<Response>): void;
+    upgradeWebSocket(req: Request): { socket: WebSocket; response: Response };
+};
+
+interface Card {
+    id: string; name: string; type: string;
+    rarity: string; power: number; province: string;
+}
+
+interface GamePlayer {
+    id: string; name: string; isBot: boolean; socket?: WebSocket;
+    hand: Card[]; totalPower: number; hasPlayed: boolean;
+    mustDraw: boolean; mustForcePick: boolean; freed: boolean;
+    winner: boolean; rank: number; isProcessingAction: boolean;
+    afkTimer?: number;
+    autoMode: boolean;
+    autoModeTimerId?: number;
+    disconnectedAt?: number;
+    userUid: string;
+    leftMatch: boolean;
+    statsSaved?: boolean;
+    botLevel?: number;
+    drawLevel: number; drawCount: number; // Level 1-5, naik berdasarkan jumlah draw
+}
+
+interface RoundPlay { playerId: string; playerName: string; card: Card | null; power: number; isForcePickPlay?: boolean; }
+interface RoundHistory { round: number; plays: RoundPlay[]; }
+
+const ALL_PROVINCES = [
+    { name: "Aceh", cards: [
+        { name: "Kopi Gayo",                  type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Masjid Raya Baiturrahman",   type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertanian Kopi",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumoh Aceh",                 type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Rencong",                    type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Ulee Balang",                type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Serune Kalee",               type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Saman",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Peusijuek",                  type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Mie Aceh",                   type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sumatera Utara", cards: [
+        { name: "Karet & Kelapa Sawit",       type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Istana Maimun",              type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perkebunan Sawit",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Bolon",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Piso Gaja Dompak",           type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Ulos",                       type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Gondang Sabangunan",         type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Tor-Tor",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Mangulosi",                  type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Bika Ambon",                 type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sumatera Barat", cards: [
+        { name: "Gambir & Kulit Manis",       type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Jam Gadang",                 type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perdagangan Rempah",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Gadang",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Karih",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Bundo Kanduang",             type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Saluang",                    type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Piring",                type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Batagak Penghulu",           type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Rendang",                    type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Riau", cards: [
+        { name: "Minyak Bumi",                type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Istana Siak",                type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Minyak",        type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Selaso Jatuh Kembar",  type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pedang Jenawi",              type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Teluk Belanga",              type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Gambus",                     type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Zapin",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Tepuk Tepung Tawar",         type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Gulai Belacan",              type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Kepulauan Riau", cards: [
+        { name: "Bauksit & Timah",            type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Fort de Kock",       type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perikanan Laut",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Belah Bubung",         type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Badik Tumbuk Lada",          type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Kebaya Labuh",               type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Gong",                       type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Tandak",                type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Mandi Safar",                type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Otak-otak",                  type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Jambi", cards: [
+        { name: "Batubara & Karet",           type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Candi Muaro Jambi",          type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perkebunan Karet",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Kajang Leko",          type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris Siginjai",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Baju Kurung Tanggung",       type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Kelintang",                  type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Sekapur Sirih",         type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Betangas",                   type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Tempoyak",                   type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Bengkulu", cards: [
+        { name: "Batubara & Emas",            type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Marlborough",        type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Batu Bara",     type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Bubungan Lima",        type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Rudus",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pakaian Rejang Lebong",      type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Dol",                        type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Andun",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Bimbang Adat",               type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Pendap",                     type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sumatera Selatan", cards: [
+        { name: "Minyak & Gas Bumi",          type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Jembatan Ampera",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Minyak",        type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Limas",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Tombak Trisula",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Aesan Gede",                 type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Accordion Palembang",        type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Tanggai",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Nganggung",                  type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Pempek",                     type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Bangka Belitung", cards: [
+        { name: "Timah",                      type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Kuto Panji",         type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Timah",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Rakit",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Siwar",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pakaian Seting",             type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Dambus",                     type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Sepen",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Buang Jong",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Lempah Kuning",              type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Lampung", cards: [
+        { name: "Kopi Robusta Lampung",       type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Menara Siger",               type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perkebunan Kopi",            type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Nuwou Sesat",          type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Terapang",                   type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pakaian Tulang Bawang",      type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Gamolan Pekhing",            type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Sigeh Penguten",        type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Cangget",                    type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Seruit",                     type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "DKI Jakarta", cards: [
+        { name: "Industri & Perdagangan",     type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Kota Tua Jakarta",           type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perdagangan & Jasa",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Kebaya",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Golok",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Kebaya Encim",               type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tehyan",                     type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Yapong",                type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Palang Pintu",               type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Kerak Telor",                type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Jawa Barat", cards: [
+        { name: "Teh & Kina",                 type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Keraton Kasepuhan Cirebon",  type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perkebunan Teh",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Kasepuhan",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Kujang",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Kebaya Sunda",               type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Angklung",                   type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Jaipong",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Seren Taun",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Seblak",                     type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Banten", cards: [
+        { name: "Baja & Industri",            type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Masjid Agung Banten",        type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Industri Baja",              type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Baduy",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Golok Ciomas",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pakaian Pangsi",             type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Dogdog Lojor",               type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Cokek",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Seba Baduy",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Sate Bandeng",               type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Jawa Tengah", cards: [
+        { name: "Batik & Tekstil",            type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Candi Borobudur",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Industri Tekstil",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Joglo",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Kebaya Jawa",                type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Gamelan",                    type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Serimpi",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Sekaten",                    type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Lumpia",                     type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "DI Yogyakarta", cards: [
+        { name: "Batik Yogyakarta",           type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Keraton Yogyakarta",         type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Industri Kerajinan",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Bangsal Kencono",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris Yogyakarta",           type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Kebaya Kesatrian",           type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Gamelan Yogyakarta",         type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Kumbang",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Labuhan Merapi",             type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Gudeg",                      type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Jawa Timur", cards: [
+        { name: "Garam & Tembakau",           type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Candi Penataran",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Industri Garam",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Situbondo",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Clurit",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pesa'an",                    type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Saronen",                    type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Remo",                  type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Karapan Sapi",               type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Rujak Cingur",               type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Bali", cards: [
+        { name: "Kopi Kintamani",             type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Pura Besakih",               type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pariwisata Budaya",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Gapura Candi Bentar",  type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris Bali",                 type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Payas Agung",                type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Gamelan Bali",               type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Pendet",                type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Ngaben",                     type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Ayam Betutu",                type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Nusa Tenggara Barat", cards: [
+        { name: "Mutiara Lombok",             type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Istana Dalam Loka",          type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Budidaya Mutiara",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Dalam Loka",           type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris NTB",                  type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Lambung",                    type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Serunai NTB",                type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Gandrung",              type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Bau Nyale",                  type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Ayam Taliwang",              type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Nusa Tenggara Timur", cards: [
+        { name: "Kopi Flores & Cendana",      type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Portugis Solor",     type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Peternakan Sapi",            type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Musalaki",             type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Sundu",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pakaian Amarasi",            type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Sasando",                    type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Caci",                  type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Pati Ka",                    type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Se'i",                       type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Kalimantan Barat", cards: [
+        { name: "Bauksit & Emas",             type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Keraton Kadriyah Pontianak", type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Bauksit",       type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Panjang",              type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Mandau",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "King Baba",                  type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Sape",                       type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Monong",                type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Naik Dango",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Bubur Pedas",                type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Kalimantan Tengah", cards: [
+        { name: "Rotan & Kayu Ulin",          type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Istana Kuning Sampit",       type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Kehutanan & Rotan",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Betang",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Mandau Kalteng",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Sangkarut",                  type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Garantung",                  type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Giring-giring",         type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Tiwah",                      type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Juhu Singkah",               type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Kalimantan Selatan", cards: [
+        { name: "Intan & Batubara",           type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Masjid Sultan Suriansyah",   type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Intan",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Bubungan Tinggi",      type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris Banjar",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Babaju Kun Galung",          type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Panting",                    type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Baksa Kembang",         type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Aruh Ganal",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Soto Banjar",                type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Kalimantan Timur", cards: [
+        { name: "Minyak & Gas Kaltim",        type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Keraton Kutai Kartanegara",  type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Migas",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Lamin",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Mandau Kaltim",              type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Kustin",                     type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Sape Kaltim",                type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Gong",                  type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Erau",                       type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Nasi Kuning",                type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Kalimantan Utara", cards: [
+        { name: "Gas Alam & Kelapa Sawit",    type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Tarakan",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perikanan & Kehutanan",      type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Baloy",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Mandau Kalut",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Ta'a",                       type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Sampe",                      type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Jepen",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Iraw Tengkayu",              type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Kepiting Soka",              type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sulawesi Utara", cards: [
+        { name: "Kelapa & Cengkeh",           type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Moraya",             type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perikanan Laut",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Walewangko",           type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris Sulut",                type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Laku Tepu",                  type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Kolintang",                  type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Maengket",              type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Tulude",                     type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Bubur Manado",               type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Gorontalo", cards: [
+        { name: "Jagung & Ikan Tuna",         type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Otanaha",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertanian Jagung",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Dulohupa",             type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Wamilo",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Biliu",                      type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Polopalo",                   type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Polopalo",              type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Molonthalo",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Binte Biluhuta",             type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sulawesi Tengah", cards: [
+        { name: "Nikel & Emas Sulteng",       type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Masjid Tua Luwuk",           type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Nikel",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Tambi",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pasatimpo",                  type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Koje",                       type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Ganda",                      type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Lumense",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Balia",                      type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Kaledo",                     type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sulawesi Barat", cards: [
+        { name: "Kakao & Kelapa Sulbar",      type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Istana Malaweg",             type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perkebunan Kakao",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Boyang",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Badik Sulbar",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pattuqduq Towaine",          type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Kecapi Sulbar",              type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Patuddu",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Sayyang Pattu'du",           type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Bau Peapi",                  type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sulawesi Selatan", cards: [
+        { name: "Nikel & Besi Sulsel",        type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Rotterdam",          type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Nikel",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Tongkonan",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Badik",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Baju Bodo",                  type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Kecapi Sulsel",              type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Kipas Pakarena",        type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Rambu Solo",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Coto Makassar",              type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Sulawesi Tenggara", cards: [
+        { name: "Nikel & Aspal Buton",        type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Keraton Buton",      type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Aspal",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Istana Buton",         type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Keris Sultra",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Babu Nggawi",                type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Ladolado",                   type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Lulo",                  type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Posuo",                      type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Lapa-lapa",                  type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Maluku", cards: [
+        { name: "Pala & Cengkeh Maluku",      type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Belgica Banda",      type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perkebunan Rempah",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Baileo",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Parang Salawaku",            type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Baju Cele",                  type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tifa",                       type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Cakalele",              type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Pukul Sapu",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Papeda",                     type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Maluku Utara", cards: [
+        { name: "Nikel & Cengkeh Malut",      type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng Tolukko Ternate",    type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Nikel",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Sasadu",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Parang Malut",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Manteren Lamo",              type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tifa Malut",                 type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Lenso",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Kololi Kie",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Gohu Ikan",                  type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Papua", cards: [
+        { name: "Emas & Tembaga Freeport",    type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Tugu MacArthur Jayapura",    type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertambangan Emas",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Honai",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pisau Belati Papua",         type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Koteka",                     type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tifa Papua",                 type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Musyoh",                type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Bakar Batu",                 type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Papeda Papua",               type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Papua Barat", cards: [
+        { name: "Gas Alam & Ikan Laut",       type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Tugu Jepang Manokwari",      type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perikanan & Migas",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Mod Aki Aksa",         type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pisau Pabar",                type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Ewer",                       type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tifa Pabar",                 type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Suanggi",               type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Wor",                        type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Ikan Bakar Manokwari",       type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Papua Selatan", cards: [
+        { name: "Kayu & Hasil Hutan",         type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Situs Megalitik Okaba",      type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Kehutanan",                  type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Gotad",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pisau Pasel",                type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Pummi",                      type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tifa Pasel",                 type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Gatzi",                 type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Yi Ha",                      type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Sagu Sep",                   type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Papua Tengah", cards: [
+        { name: "Emas & Hasil Hutan Pateng",  type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Situs Prasejarah Lembah Baliem", type: "Bangunan Bersejarah", rarity: "legendary", power: 9 },
+        { name: "Pertanian & Kehutanan",      type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Karapao",              type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pisau Pateng",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Sali",                       type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tifa Pateng",                type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Yuw",                   type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Bakar Batu Pateng",          type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Sagu Bakar",                 type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Papua Pegunungan", cards: [
+        { name: "Hasil Hutan & Kopi",         type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Monumen Yalimo",             type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pertanian Pegunungan",       type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Honai Pegunungan",     type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pisau Peg",                  type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Yokal",                      type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Pikon",                      type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Selamat Datang",        type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Festival Lembah Baliem",     type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Udang Selingkuh",            type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+    { name: "Papua Barat Daya", cards: [
+        { name: "Ikan & Mutiara Sorong",      type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
+        { name: "Benteng VOC Sorong",         type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Perikanan & Pariwisata",     type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
+        { name: "Rumah Kambik",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
+        { name: "Pisau Pabarday",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
+        { name: "Boe",                        type: "Pakaian Adat",        rarity: "rare",        power: 5 },
+        { name: "Tifa Pabarday",              type: "Alat Musik",          rarity: "uncommon",    power: 4 },
+        { name: "Tari Aluyen",                type: "Tarian",              rarity: "uncommonplus",power: 3 },
+        { name: "Injak Piring",               type: "Adat Istiadat",       rarity: "commonplus",  power: 2 },
+        { name: "Udang Karang",               type: "Makanan Khas",        rarity: "common",      power: 1 },
+    ]},
+];
+
+const ALL_CARDS: Card[] = [];
+ALL_PROVINCES.forEach(province => {
+    province.cards.forEach(card => {
+        ALL_CARDS.push({ ...card, province: province.name, id: `${province.name}-${card.name}` });
+    });
+});
+
+// =============================================
+// UTILITIES
+// =============================================
+function sanitizeName(name: unknown): string {
+    if (typeof name !== 'string') return '';
+    return name.trim().replace(/[\x00-\x1F\x7F]/g, '').slice(0, 30);
+}
+
+// =============================================
+// DRAW CARD LEVEL SYSTEM
+// Level 1 (awal) → Level 10 (tertinggi)
+// Naik level setiap 2 draw (total 18 draw untuk mencapai Level 10)
+// Prioritas: rarity dengan skor tertinggi di-draw lebih dulu (greedy)
+// =============================================
+const DRAW_RATES: Record<number, Record<string, number>> = {
+    1: { // Level 1 - Common dominan (22%)
+        common: 22, commonplus: 16, uncommonplus: 13, uncommon: 11,
+        rare: 10, rarestar: 9, rareplus: 8, epic: 6, legendary: 4, mythic: 1
+    },
+    2: { // Level 2 - Common+ dominan (21%)
+        commonplus: 21, common: 16, uncommonplus: 15, uncommon: 13,
+        rare: 11, rarestar: 10, rareplus: 7, epic: 4, legendary: 2, mythic: 1
+    },
+    3: { // Level 3 - Uncommon+ dominan (20%)
+        uncommonplus: 20, uncommon: 14, commonplus: 15, common: 13,
+        rare: 12, rarestar: 11, rareplus: 8, epic: 4, legendary: 2, mythic: 1
+    },
+    4: { // Level 4 - Uncommon dominan (19%)
+        uncommon: 19, uncommonplus: 15, commonplus: 13, common: 11,
+        rare: 13, rarestar: 12, rareplus: 9, epic: 5, legendary: 2, mythic: 1
+    },
+    5: { // Level 5 - Rare dominan (18%)
+        rare: 18, uncommon: 14, rarestar: 13, uncommonplus: 13,
+        rareplus: 11, commonplus: 11, common: 10, epic: 8, legendary: 1, mythic: 1
+    },
+    6: { // Level 6 - Rare★ dominan (17%)
+        rarestar: 17, rare: 14, uncommon: 13, rareplus: 12,
+        uncommonplus: 11, commonplus: 10, epic: 9, common: 9, legendary: 4, mythic: 1
+    },
+    7: { // Level 7 - Rare+ dominan (16%)
+        rareplus: 16, rarestar: 14, rare: 13, uncommon: 11,
+        epic: 12, uncommonplus: 10, commonplus: 9, common: 8, legendary: 5, mythic: 2
+    },
+    8: { // Level 8 - Epic dominan (15%)
+        epic: 15, rareplus: 14, rarestar: 13, legendary: 11,
+        rare: 11, uncommon: 10, uncommonplus: 9, commonplus: 8, common: 7, mythic: 2
+    },
+    9: { // Level 9 - Legendary dominan (14%)
+        legendary: 14, epic: 14, rareplus: 13, rarestar: 11,
+        rare: 10, uncommon: 9, uncommonplus: 8, commonplus: 7, common: 6, mythic: 8
+    },
+    10: { // Level 10 - Mythic dominan (20%)
+        mythic: 20, legendary: 17, epic: 14, rareplus: 11,
+        rarestar: 10, rare: 9, uncommon: 7, uncommonplus: 6, commonplus: 4, common: 2
+    }
+};
+const RARITY_ORDER = ['mythic','legendary','epic','rareplus','rarestar','rare','uncommon','uncommonplus','commonplus','common'];
+const LEVEL_NAMES: Record<number, string> = {
+    1: 'Lv1', 2: 'Lv2', 3: 'Lv3', 4: 'Lv4', 5: 'Lv5',
+    6: 'Lv6', 7: 'Lv7', 8: 'Lv8', 9: 'Lv9', 10: 'Lv10'
+};
+// Threshold: naik level setiap 3 draw (Lv1→Lv2=3, Lv2→Lv3=6, ..., Lv9→Lv10=27)
+function calcDrawLevel(drawCount: number): number {
+    return Math.min(Math.floor(drawCount / 3) + 1, 10);
+}
+
+// =============================================
+// FIREBASE REST API CLIENT (no external deps)
+// =============================================
+const FB_DB_URL = Deno.env.get("FIREBASE_DATABASE_URL")
+    || "https://rex-server-8a176-default-rtdb.asia-southeast1.firebasedatabase.app";
+
+// deno-lint-ignore no-explicit-any
+let fbServiceAccount: any = null;
+let fbTokenCache: { token: string; expiry: number } | null = null;
+
+(function loadServiceAccount() {
+    const raw = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
+    if (!raw) { console.warn("⚠️  FIREBASE_SERVICE_ACCOUNT tidak diset — rank disimpan oleh client sebagai fallback"); return; }
+    try { fbServiceAccount = JSON.parse(raw); console.log("✅ Firebase service account loaded"); }
+    catch (e) { console.error("❌ FIREBASE_SERVICE_ACCOUNT JSON invalid:", e); }
+})();
+
+async function fbGetToken(): Promise<string | null> {
+    if (!fbServiceAccount) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (fbTokenCache && fbTokenCache.expiry > now + 60) return fbTokenCache.token;
+    try {
+        const b64url = (obj: object) =>
+            btoa(JSON.stringify(obj)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+        const header  = { alg: "RS256", typ: "JWT" };
+        const payload = {
+            iss: fbServiceAccount.client_email, sub: fbServiceAccount.client_email,
+            aud: "https://oauth2.googleapis.com/token",
+            iat: now, exp: now + 3600,
+            scope: "https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email"
+        };
+        const input   = `${b64url(header)}.${b64url(payload)}`;
+        const pemBody = fbServiceAccount.private_key
+            .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+            .replace(/-----END PRIVATE KEY-----/g, "")
+            .replace(/\n/g, "");
+        const der = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+        const key = await crypto.subtle.importKey(
+            "pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]
+        );
+        const sig    = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(input));
+        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
+            .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+        const jwt    = `${input}.${sigB64}`;
+        const resp   = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`
+        });
+        const json = await resp.json();
+        if (!json.access_token) throw new Error(JSON.stringify(json));
+        fbTokenCache = { token: json.access_token, expiry: now + 3590 };
+        return fbTokenCache.token;
+    } catch (e) { console.error("❌ fbGetToken error:", e); return null; }
+}
+
+// deno-lint-ignore no-explicit-any
+async function fbTransaction(path: string, updateFn: (cur: any) => any): Promise<boolean> {
+    const token = await fbGetToken();
+    if (!token) return false;
+    const url = `${FB_DB_URL}${path}.json`;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const getRes = await fetch(url, { headers: { Authorization: `Bearer ${token}`, "X-Firebase-ETag": "true" } });
+        const etag   = getRes.headers.get("ETag") ?? "*";
+        const cur    = await getRes.json();
+        const next   = updateFn(cur === null ? undefined : cur);
+        if (next === undefined) return false;
+        const putRes = await fetch(url, {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "if-match": etag },
+            body: JSON.stringify(next)
+        });
+        if (putRes.ok)          return true;
+        if (putRes.status === 412) continue; // conflict → retry
+        const errText = await putRes.text().catch(() => "");
+        console.error(`❌ fbTransaction PUT failed ${putRes.status}: ${errText}`);
+        return false;
+    }
+    return false;
+}
+
+async function fbPush(path: string, value: unknown): Promise<boolean> {
+    const token = await fbGetToken();
+    if (!token) return false;
+    const res = await fetch(`${FB_DB_URL}${path}.json`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(value)
+    });
+    if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.error(`❌ fbPush POST failed ${res.status} path=${path}: ${errText}`);
+    }
+    return res.ok;
+}
+
+async function fbSet(path: string, value: unknown): Promise<boolean> {
+    const token = await fbGetToken();
+    if (!token) return false;
+    const res = await fetch(`${FB_DB_URL}${path}.json`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(value)
+    });
+    if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.error(`❌ fbSet PUT failed ${res.status}: ${errText}`);
+    }
+    return res.ok;
+}
+
+// deno-lint-ignore no-explicit-any
+async function fbRead(path: string): Promise<any> {
+    const token = await fbGetToken();
+    if (!token) return null;
+    const res = await fetch(`${FB_DB_URL}${path}.json`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+}
+
+// =============================================
+// RANK SYSTEM (SERVER-SIDE)
+// =============================================
+const RANKS = [
+    "Bronze III", "Bronze II", "Bronze I",
+    "Silver III", "Silver II", "Silver I",
+    "Gold III",   "Gold II",   "Gold I",
+    "Diamond III","Diamond II","Diamond I",
+    "Platinum III","Platinum II","Platinum I",
+    "Platinum MAX"
+];
+const RANK_CHANGES: Record<string, number[]> = {
+    Bronze:   [60, 30, 15, -10],
+    Silver:   [48, 24, 12, -17],
+    Gold:     [36, 18,  9, -24],
+    Diamond:  [24, 12,  6, -31],
+    Platinum: [15,  6,  3, -40],
+};
+function rankTier(name: string): string {
+    if (name === "Platinum MAX") return "Platinum";
+    return ["Bronze","Silver","Gold","Diamond","Platinum"].find(t => name.startsWith(t)) || "Bronze";
+}
+function calcRank(name: string, pts: number, pos: number): { name: string; pts: number } {
+    const change = RANK_CHANGES[rankTier(name)][pos - 1];
+    const idx    = RANKS.indexOf(name);
+    let np = pts + change, nn = name;
+    if (np >= 100 && idx < RANKS.length - 1) { nn = RANKS[idx + 1]; np -= 100; }
+    else if (np < 0) { if (name === "Bronze III") np = 0; else { nn = RANKS[idx - 1]; np = Math.max(0, 100 + np); } }
+    return { name: nn, pts: np };
+}
+
+async function savePlayerStats(userUid: string, playerName: string, position: number): Promise<boolean> {
+    if (!fbServiceAccount || !userUid || userUid === "BOT") return false;
+    try {
+        const base = `/users/${userUid}`;
+        // RankData dulu agar bisa catat perubahan ke history
+        let _rankBefore = "Bronze III", _rankAfter = "Bronze III", _ptsChange = 0, _ptsBefore = 0, _ptsAfter = 0;
+        let _peakRank = "Bronze III";
+        const rankOk = await fbTransaction(`${base}/rankData`, (r) => {
+            if (!r) r = { rankName: "Bronze III", points: 0, peakRank: "Bronze III", peakRankIndex: 0 };
+            _rankBefore = r.rankName || "Bronze III";
+            _ptsBefore  = r.points   || 0;
+            _ptsChange  = RANK_CHANGES[rankTier(_rankBefore)][position - 1];
+            const res   = calcRank(_rankBefore, _ptsBefore, position);
+            _rankAfter  = res.name;
+            _ptsAfter   = res.pts;
+            r.rankName  = res.name; r.points = res.pts;
+            const ni    = RANKS.indexOf(res.name);
+            if (ni > (r.peakRankIndex || 0)) {
+                r.peakRank = res.name; r.peakRankIndex = ni; r.peakRankPoints = res.pts;
+            } else if (res.name === r.peakRank && res.pts > (r.peakRankPoints || 0)) {
+                r.peakRankPoints = res.pts;
+            }
+            _peakRank = r.peakRank || res.name;
+            return r;
+        });
+        // Update stats dulu agar hasilnya bisa dimasukkan ke leaderboard node
+        // deno-lint-ignore no-explicit-any
+        let _updatedStats: any = null;
+        const statsOk = await fbTransaction(`${base}/stats`, (s) => {
+            if (!s) s = { totalMatches: 0, rank1: 0, rank2: 0, rank3: 0, rank4: 0 };
+            s.totalMatches = (s.totalMatches || 0) + 1;
+            s[`rank${position}`] = (s[`rank${position}`] || 0) + 1;
+            _updatedStats = { ...s };
+            return s;
+        });
+        // Push history dengan retry (hingga 3x, 800ms antar percobaan)
+        // karena POST ke Firebase sesekali gagal karena network hiccup.
+        let histOk = false;
+        for (let hi = 0; hi < 3 && !histOk; hi++) {
+            if (hi > 0) await new Promise(r => setTimeout(r, 800));
+            histOk = await fbPush(`${base}/history`, {
+                rank: position, date: Date.now(),
+                rankBefore: _rankBefore, rankAfter: _rankAfter,
+                ptsBefore: _ptsBefore, ptsAfter: _ptsAfter, ptsChange: _ptsChange
+            });
+        }
+        // Re-read rankData terbaru sebelum tulis leaderboard.
+        // Ini memastikan jika ada race condition (beberapa savePlayerStats jalan bersamaan),
+        // semua akan baca nilai final yang sama dan leaderboard selalu sinkron dengan rankData.
+        const freshRank = await fbRead(`${base}/rankData`);
+        const _finalRankName = freshRank?.rankName ?? _rankAfter;
+        const _finalPts      = freshRank?.points   ?? _ptsAfter;
+        const _finalPeakRank = freshRank?.peakRank  ?? _peakRank;
+
+        // Update leaderboard (non-kritis)
+        const lbOk = await fbSet(`/leaderboard/${userUid}`, {
+            name: playerName,
+            rankName: _finalRankName,
+            points:   _finalPts,
+            peakRank: _finalPeakRank,
+            totalMatches: _updatedStats?.totalMatches ?? 0,
+            rank1: _updatedStats?.rank1 ?? 0,
+            rank2: _updatedStats?.rank2 ?? 0,
+            rank3: _updatedStats?.rank3 ?? 0,
+            rank4: _updatedStats?.rank4 ?? 0,
+            updatedAt: Date.now()
+        });
+        // lbOk bersifat non-kritis: kegagalan leaderboard tidak boleh memicu client fallback
+        const ok = statsOk && histOk && rankOk;
+        console.log(`${ok ? "✅" : "⚠️ "} savePlayerStats uid=${userUid} pos=${position} stats=${statsOk} hist=${histOk} rank=${rankOk} lb=${lbOk}`);
+        return ok;
+    } catch (e) {
+        console.error(`❌ savePlayerStats uid=${userUid}:`, e);
+        return false;
+    }
+}
+
+async function saveProvinceStats(
+    provinces: string[],
+    players: GamePlayer[],
+    roomId: string,
+    isCustomRoom: boolean
+): Promise<void> {
+    if (!fbServiceAccount || provinces.length === 0) return;
+    try {
+        // Counts sudah di-increment saat match mulai (pickWeightedProvinces).
+        // Di sini hanya catat: totalMatches (hanya match yang benar-benar selesai) + history.
+        await fbTransaction('/provinceStats/totalMatches', (cur: number | undefined) => (cur ?? 0) + 1);
+        const humanPlayers = players.filter(p => !p.isBot).map(p => `${p.name} (${p.userUid})`);
+        await fbPush('/provinceStats/history', {
+            timestamp: Date.now(),
+            matchId: roomId,
+            isCustomRoom,
+            provinces,
+            players: humanPlayers
+        });
+        console.log(`✅ saveProvinceStats roomId=${roomId}`);
+    } catch (e) {
+        console.error(`❌ saveProvinceStats error:`, e);
+    }
+}
+
+// Pilih 14 provinsi paling jarang muncul + langsung increment counts secara atomik.
+// Dengan fbTransaction, dua match yang mulai bersamaan tidak akan pernah baca data yang sama —
+// yang kedua otomatis retry dan melihat hasil increment dari yang pertama.
+async function pickWeightedProvinces(): Promise<string[]> {
+    const MANDATORY = 'Bangka Belitung';
+    const candidates = ALL_PROVINCES.filter(p => p.name !== MANDATORY);
+    let selected: string[] = [];
+
+    const ok = await fbTransaction('/provinceStats/counts', (cur: Record<string, number> | undefined) => {
+        const counts: Record<string, number> = { ...(cur ?? {}) };
+
+        // Sort ascending berdasarkan count (paling jarang → paling awal)
+        const sorted = [...candidates].sort((a, b) => (counts[a.name] ?? 0) - (counts[b.name] ?? 0));
+
+        // Ambil 15 terkecil; jika ada seri di posisi batas, random di antara yang seri
+        const cutoff = counts[sorted[14].name] ?? 0;
+        const definiteIn = sorted.filter(p => (counts[p.name] ?? 0) < cutoff).map(p => p.name);
+        const tied = sorted.filter(p => (counts[p.name] ?? 0) === cutoff).map(p => p.name);
+        const need = 15 - definiteIn.length;
+        const fromTied = [...tied].sort(() => Math.random() - 0.5).slice(0, need);
+        selected = [...definiteIn, ...fromTied];
+
+        // Increment counts hanya untuk 14 provinsi random
+        // (Bangka Belitung tidak dilacak — selalu wajib hadir, countnya tidak informatif)
+        for (const name of selected) counts[name] = (counts[name] ?? 0) + 1;
+        return counts;
+    });
+
+    if (!ok || selected.length < 15) {
+        // Fallback: pure random jika transaksi gagal (misal Firebase tidak tersedia)
+        console.warn('⚠️ pickWeightedProvinces fallback ke random murni');
+        return [...candidates].sort(() => Math.random() - 0.5).slice(0, 15).map(p => p.name);
+    }
+    return selected;
+}
+
+class GameEngine {
+    roomId: string;
+    onGameOver?: () => void;
+    selectedProvinces: string[] = [];
+    isCustomRoom: boolean = false;
+    spectatorSockets: WebSocket[] = [];
+    spectatorUserUids: string[] = [];
+
+    addSpectator(socket: WebSocket, userUid?: string) {
+        this.spectatorSockets.push(socket);
+        if (userUid && !this.spectatorUserUids.includes(userUid)) this.spectatorUserUids.push(userUid);
+    }
+    removeSpectator(socket: WebSocket) { this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket); }
+
+    setSelectedProvinces(provinces: string[]) {
+        this.selectedProvinces = provinces;
+    }
+
+    gs: {
+        round: number; phase: number; phase1Player: string | null;
+        drawPile: Card[]; discardPile: Card[]; topCard: Card[];
+        currentProvince: string | null; players: GamePlayer[];
+        forcePickMode: boolean; forcePickPlayers: GamePlayer[];
+        forcePickProcessing: boolean; isHandlingForcePick: boolean;
+        isEndingRound: boolean; isStartingPhase: boolean;
+        currentRoundPlays: RoundPlay[]; roundHistory: RoundHistory[];
+        winners: GamePlayer[]; gameOver: boolean; surrenderCount: number;
+    };
+
+    constructor(roomId: string) {
+        this.roomId = roomId;
+        this.gs = {
+            round: 1, phase: 1, phase1Player: null,
+            drawPile: [], discardPile: [], topCard: [],
+            currentProvince: null, players: [],
+            forcePickMode: false, forcePickPlayers: [],
+            forcePickProcessing: false, isHandlingForcePick: false,
+            isEndingRound: false, isStartingPhase: false,
+            currentRoundPlays: [], roundHistory: [],
+            winners: [], gameOver: false, surrenderCount: 0
+        };
+    }
+
+    addPlayer(p: { id: string; name: string; isBot: boolean; socket?: WebSocket; userUid: string; botLevel?: number }) {
+        const player: GamePlayer = {
+            id: p.id, name: p.name, isBot: p.isBot, socket: p.socket,
+            hand: [], totalPower: 0, hasPlayed: false, mustDraw: false,
+            mustForcePick: false, freed: false, winner: false, rank: 0,
+            isProcessingAction: false, autoMode: false, userUid: p.userUid || '',
+            leftMatch: false, statsSaved: false, botLevel: p.botLevel,
+            drawLevel: 1, drawCount: 0
+        };
+        this.gs.players.push(player);
+    }
+
+    addBot(name: string, level: number = 1) {
+        this.addPlayer({ id: `bot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, name, isBot: true, userUid: 'BOT', botLevel: level });
+    }
+
+    static BOT_NAMES = ['Miya','Nayla','Aldi','Marcel','Zoe','Kara','Mega','Genta','Flex','Angel','Teorita','Miko','Luba','Nana','Kong','Walka'];
+    static usedBotNames: string[] = [];
+
+    static pickBotName(): string {
+        const available = GameEngine.BOT_NAMES.filter(n => !GameEngine.usedBotNames.includes(n));
+        const pool = available.length > 0 ? available : GameEngine.BOT_NAMES;
+        const name = pool[Math.floor(Math.random() * pool.length)];
+        GameEngine.usedBotNames.push(name);
+        if (GameEngine.usedBotNames.length > GameEngine.BOT_NAMES.length) GameEngine.usedBotNames = [];
+        return name;
+    }
+
+    private shuffle<T>(arr: T[]): T[] {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    private getActivePlayers() { return this.gs.players.filter(p => !p.winner); }
+    private updatePower(p: GamePlayer) { p.totalPower = p.hand.reduce((s, c) => s + c.power, 0); }
+
+    private checkWin(player: GamePlayer) {
+        if (player.hand.length === 0 && !player.winner) {
+            player.winner = true;
+            // Cari rank TERBAIK (terkecil) yang belum dipakai.
+            // Penting: jika ada surrenderer yang sudah ambil rank besar (misal rank 4),
+            // pemain yang menang duluan tetap dapat rank 1, bukan winners.length+1.
+            const takenRanks = new Set(this.gs.winners.map(w => w.rank));
+            let rank = 1;
+            while (takenRanks.has(rank)) rank++;
+            player.rank = rank;
+            this.gs.winners.push(player);
+            const medals = ['🥇','🥈','🥉','🎖️'];
+            this.broadcastLog(`${medals[player.rank-1] || '🏅'} ${player.name} MENANG! Peringkat: ${player.rank}`);
+
+            // Simpan stats segera saat pemain menang (mirip pola handleSurrender).
+            // Dilakukan di sini karena socket masih terbuka — STATS_SAVED / SAVE_STATS_CLIENT
+            // masih bisa dikirim ke client. Flag statsSaved mencegah double-save di endGame().
+            if (!player.isBot && player.userUid && player.userUid !== "BOT" && !player.statsSaved && !this.isCustomRoom) {
+                player.statsSaved = true;
+                const _p = player;
+                savePlayerStats(_p.userUid, _p.name, _p.rank).then(ok => {
+                    if (ok) {
+                        if (_p.socket && _p.socket.readyState === 1) {
+                            try { _p.socket.send(JSON.stringify({ type: 'STATS_SAVED', rank: _p.rank })); } catch (_) { /* noop */ }
+                        }
+                    } else {
+                        _p.statsSaved = false;
+                        if (_p.socket && _p.socket.readyState === 1) {
+                            // Socket masih terbuka → minta client lakukan fallback save
+                            try { _p.socket.send(JSON.stringify({ type: 'SAVE_STATS_CLIENT', rank: _p.rank })); } catch (_) { /* noop */ }
+                        } else {
+                            // Socket sudah tutup (player sudah meninggalkan match) → retry server-side
+                            console.log(`⚠️ checkWin save gagal (socket tutup) → retry server-side uid=${_p.userUid}`);
+                            _p.statsSaved = true;
+                            setTimeout(() => {
+                                savePlayerStats(_p.userUid, _p.name, _p.rank).then(ok2 => {
+                                    if (ok2) {
+                                        console.log(`✅ checkWin retry berhasil uid=${_p.userUid}`);
+                                    } else {
+                                        _p.statsSaved = false;
+                                        console.log(`❌ checkWin retry juga gagal uid=${_p.userUid}`);
+                                    }
+                                }).catch(e => { console.error(`❌ checkWin retry exception uid=${_p.userUid}:`, e); _p.statsSaved = false; });
+                            }, 2000);
+                        }
+                    }
+                }).catch(e => { console.error(`❌ checkWin save exception uid=${_p.userUid}:`, e); _p.statsSaved = false; });
+            }
+        }
+    }
+
+    private clearAfkTimer(p: GamePlayer) {
+        if (p.afkTimer) { clearTimeout(p.afkTimer); p.afkTimer = undefined; }
+    }
+
+    private clearAllAfkTimers() { this.gs.players.forEach(p => this.clearAfkTimer(p)); }
+
+    private setAfkTimer(player: GamePlayer, action: () => void, delay = 25000) {
+        this.clearAfkTimer(player);
+        if (player.isBot) return;
+        player.afkTimer = setTimeout(() => {
+            if (!this.gs.gameOver) {
+                this.broadcastLog(`⏰ ${player.name} AFK - aksi otomatis`);
+                action();
+            }
+        }, delay) as unknown as number;
+    }
+
+    private logDrawLevels() {
+        const active = this.getActivePlayers();
+        if (active.length === 0) return;
+        const logParts = active.map(p => `${p.name}: ${LEVEL_NAMES[p.drawLevel]}(${p.drawCount} draws)`);
+        this.broadcastLog(`📊 Draw Level: ${logParts.join(' | ')}`);
+    }
+
+    private dealCard(player: GamePlayer, maxRetry = 50): boolean {
+        if (this.gs.drawPile.length === 0) {
+            player.mustForcePick = true; player.mustDraw = false;
+            this.broadcastLog(`⚠️ Draw Pile habis! ${player.name} → Force Pick`);
+            return false;
+        }
+        const usedIds = new Set([
+            ...this.gs.topCard.map(c => c.id),
+            ...this.gs.players.flatMap(p => p.hand.map(c => c.id))
+        ]);
+
+        // --- Weighted random by rarity (draw level system) ---
+        const availableCards = this.gs.drawPile.filter(c => !usedIds.has(c.id));
+        if (availableCards.length > 0) {
+            const level = player.drawLevel ?? 1;
+            const rateTable = DRAW_RATES[level] ?? DRAW_RATES[1];
+
+            // Kelompokkan kartu tersedia per rarity
+            const byRarity: Record<string, Card[]> = {};
+            for (const c of availableCards) {
+                if (!byRarity[c.rarity]) byRarity[c.rarity] = [];
+                byRarity[c.rarity].push(c);
+            }
+
+            // Greedy: pilih rarity dengan rate tertinggi (level) yang masih ada stoknya
+            // Jika ada seri (rate sama), pilih acak di antara yang seri
+            // Stok = syarat masuk saja, tidak memengaruhi persentase
+            const available = RARITY_ORDER
+                .filter(r => byRarity[r]?.length && (rateTable[r] ?? 0) > 0)
+                .sort((a, b) => (rateTable[b] ?? 0) - (rateTable[a] ?? 0));
+
+            if (available.length > 0) {
+                const topRate = rateTable[available[0]] ?? 0;
+                const topRarities = available.filter(r => (rateTable[r] ?? 0) === topRate);
+                const chosenRarity = topRarities[Math.floor(Math.random() * topRarities.length)];
+                // Pilih kartu acak dari rarity terpilih
+                const pool = byRarity[chosenRarity];
+                if (pool?.length) {
+                    const chosen = pool[Math.floor(Math.random() * pool.length)];
+                    const idx = this.gs.drawPile.indexOf(chosen);
+                    if (idx !== -1) this.gs.drawPile.splice(idx, 1);
+                    player.hand.push(chosen);
+                    this.updatePower(player);
+                    player.drawCount++;
+                    const newLevel = calcDrawLevel(player.drawCount);
+                    if (newLevel > player.drawLevel) {
+                        player.drawLevel = newLevel;
+                        this.broadcastLog(`⬆️ ${player.name} naik ke Draw ${LEVEL_NAMES[newLevel]}! (${player.drawCount} draws)`);
+                    }
+                    this.broadcastLog(`🎴 ${player.name} draw [${LEVEL_NAMES[level]}]: ${chosen.name} (${chosen.rarity})`);
+                    return true;
+                }
+            }
+        }
+
+        // Fallback: ambil kartu pertama yang tersedia dari draw pile
+        for (let attempt = 0; attempt < maxRetry; attempt++) {
+            if (this.gs.drawPile.length === 0) break;
+            const card = this.gs.drawPile.pop()!;
+            if (!usedIds.has(card.id)) {
+                player.hand.push(card); this.updatePower(player);
+                player.drawCount++;
+                const newLevel = calcDrawLevel(player.drawCount);
+                if (newLevel > player.drawLevel) {
+                    player.drawLevel = newLevel;
+                    this.broadcastLog(`⬆️ ${player.name} naik ke Draw ${LEVEL_NAMES[newLevel]}! (${player.drawCount} draws)`);
+                }
+                this.broadcastLog(`🎴 ${player.name} draw [${LEVEL_NAMES[player.drawLevel]}]: ${card.name} (${card.rarity})`);
+                return true;
+            }
+            this.gs.drawPile.splice(Math.floor(Math.random() * this.gs.drawPile.length), 0, card);
+        }
+        player.mustForcePick = true; player.mustDraw = false;
+        return false;
+    }
+
+    startGame() {
+        // Gunakan hanya kartu dari provinsi terpilih (7 provinsi per match)
+        const cardsPool = this.selectedProvinces.length > 0
+            ? ALL_CARDS.filter(c => this.selectedProvinces.includes(c.province))
+            : ALL_CARDS;
+        this.gs.drawPile = this.shuffle([...cardsPool]);
+        const usedIds = new Set<string>();
+
+        // Distribusi per pemain: 1 kartu per rarity (10 kartu total)
+        const DEAL_PLAN: { rarity: string; count: number }[] = [
+            { rarity: 'mythic',       count: 1 },
+            { rarity: 'legendary',    count: 1 },
+            { rarity: 'epic',         count: 1 },
+            { rarity: 'rareplus',     count: 1 },
+            { rarity: 'rarestar',     count: 1 },
+            { rarity: 'rare',         count: 1 },
+            { rarity: 'uncommon',     count: 1 },
+            { rarity: 'uncommonplus', count: 1 },
+            { rarity: 'commonplus',   count: 1 },
+            { rarity: 'common',       count: 1 },
+        ];
+
+        this.gs.players.forEach(player => {
+            for (const slot of DEAL_PLAN) {
+                let dealt = 0;
+                // Cari kartu dari drawPile sesuai rarity
+                for (let attempt = 0; attempt < this.gs.drawPile.length * 2 && dealt < slot.count; attempt++) {
+                    const idx = this.gs.drawPile.findIndex(c => c.rarity === slot.rarity && !usedIds.has(c.id));
+                    if (idx === -1) break;
+                    const card = this.gs.drawPile.splice(idx, 1)[0];
+                    player.hand.push(card);
+                    usedIds.add(card.id);
+                    this.updatePower(player);
+                    dealt++;
+                }
+            }
+        });
+
+        this.broadcastLog(`🎮 Game dimulai! 16 provinsi aktif. Setiap pemain mendapat 10 kartu (1 per rarity).`);
+        setTimeout(() => this.startPhase1(), 500);
+    }
+
+    private startPhase1() {
+        if (this.gs.gameOver || this.gs.isStartingPhase) return;
+        this.gs.isStartingPhase = true;
+        this.gs.phase = 1;
+        this.gs.topCard = []; this.gs.currentProvince = null;
+        this.gs.currentRoundPlays = [];
+        this.gs.forcePickMode = false; this.gs.forcePickPlayers = [];
+        this.gs.forcePickProcessing = false; this.gs.isHandlingForcePick = false;
+        this.gs.players.forEach(p => {
+            p.hasPlayed = false; p.mustDraw = false; p.mustForcePick = false;
+            p.freed = false; p.isProcessingAction = false;
+            this.clearAfkTimer(p);
+        });
+        setTimeout(() => { this.gs.isStartingPhase = false; }, 100);
+
+        // Log draw level masing-masing pemain
+        this.logDrawLevels();
+
+        if (this.gs.round === 1) {
+            this.broadcastGameState();
+            setTimeout(() => this.systemPlayPhase1(), 800);
+            return;
+        }
+
+        const lastRound = this.gs.roundHistory[this.gs.roundHistory.length - 1];
+        const validPlays = (lastRound?.plays || []).filter(play => {
+            if (play.power === 0) return false;
+            if (play.isForcePickPlay) return false;
+            const p = this.gs.players.find(p => p.id === play.playerId);
+            return p && !p.winner;
+        });
+
+        if (validPlays.length === 0) {
+            this.broadcastGameState();
+            setTimeout(() => this.systemPlayPhase1(), 800);
+            return;
+        }
+
+        validPlays.sort((a, b) => b.power - a.power);
+        const phase1Player = this.gs.players.find(p => p.id === validPlays[0].playerId);
+        if (!phase1Player) {
+            this.broadcastGameState();
+            setTimeout(() => this.systemPlayPhase1(), 800);
+            return;
+        }
+
+        this.gs.phase1Player = phase1Player.id;
+        this.broadcastLog(`🎯 👤 ${phase1Player.name} mendapat giliran Tahap 1!`);
+
+        if (phase1Player.isBot) {
+            this.broadcastGameState();
+            setTimeout(() => this.botPlayPhase1(phase1Player), 1000);
+        } else {
+            this.setAfkTimer(phase1Player, () => {
+                if (!phase1Player.hasPlayed) this.setPlayerAutoMode(phase1Player.id, true, 'AFK');
+            });
+            this.broadcastGameState();
+            // Jika phase1Player sedang auto-mode (disconnect), trigger aksi cepat (3s bukan 30s)
+            if (phase1Player.autoMode) setTimeout(() => this.runAutoAction(phase1Player), 500);
+        }
+    }
+
+    private systemPlayPhase1() {
+        let card: Card | undefined;
+        if (this.gs.drawPile.length > 0) {
+            card = this.gs.drawPile.pop()!;
+        } else if (this.gs.discardPile.length > 0) {
+            card = this.gs.discardPile.splice(Math.floor(Math.random() * this.gs.discardPile.length), 1)[0];
+            this.broadcastLog(`♻️ Draw Pile habis! Ambil dari Discard Pile`);
+        } else {
+            this.broadcastLog(`❌ Tidak ada kartu tersisa! Game berakhir.`);
+            this.endGame(); return;
+        }
+        this.gs.currentProvince = card.province;
+        this.gs.topCard = [card];
+        this.gs.phase1Player = 'system';
+        this.gs.currentRoundPlays.push({ playerId: 'system', playerName: 'Sistem', card, power: card.power });
+        this.broadcastLog(`🎴 Sistem menjatuhkan ${card.name} (${card.province}) - Power ${card.power}`);
+        this.broadcastGameState();
+        setTimeout(() => this.startPhase2(), 1500);
+    }
+
+    private botPlayPhase1(bot: GamePlayer) {
+        if (bot.hasPlayed || bot.hand.length === 0) return;
+        const level = bot.botLevel ?? 1;
+        let card: Card;
+
+        if (level === 1) {
+            // Level 1 (Bronze): mainkan kartu dengan power terbesar
+            card = [...bot.hand].sort((a, b) => b.power - a.power)[0];
+        } else if (level === 2) {
+            // Level 2 (Gold): pilih provinsi dengan kartu terbanyak di tangan,
+            // lalu mainkan power terkecil dari provinsi itu (hemat high-power untuk Phase 1 berikutnya)
+            const byProvince: Record<string, Card[]> = {};
+            for (const c of bot.hand) {
+                if (!byProvince[c.province]) byProvince[c.province] = [];
+                byProvince[c.province].push(c);
+            }
+            const bestProvince = Object.entries(byProvince)
+                .sort((a, b) => b[1].length - a[1].length)[0][0];
+            card = byProvince[bestProvince].sort((a, b) => a.power - b.power)[0];
+        } else {
+            // Level 3 (Platinum): pilih provinsi terbanyak di tangan bot,
+            // jika seri → pilih provinsi yang paling sedikit dimiliki lawan (paksa mereka draw/force pick),
+            // lalu mainkan power terkecil dari provinsi itu
+            const byProvince: Record<string, Card[]> = {};
+            for (const c of bot.hand) {
+                if (!byProvince[c.province]) byProvince[c.province] = [];
+                byProvince[c.province].push(c);
+            }
+            const opponents = this.gs.players.filter(p => p.id !== bot.id && !p.winner);
+            const sorted = Object.entries(byProvince).sort((a, b) => {
+                if (b[1].length !== a[1].length) return b[1].length - a[1].length;
+                // Tiebreak: pilih provinsi yang paling sedikit dimiliki lawan
+                const oppA = opponents.reduce((sum, p) => sum + p.hand.filter(c => c.province === a[0]).length, 0);
+                const oppB = opponents.reduce((sum, p) => sum + p.hand.filter(c => c.province === b[0]).length, 0);
+                return oppA - oppB;
+            });
+            const bestProvince = sorted[0][0];
+            card = byProvince[bestProvince].sort((a, b) => a.power - b.power)[0];
+        }
+
+        this.gs.currentProvince = card.province;
+        this.gs.topCard = [card];
+        bot.hand.splice(bot.hand.findIndex(c => c.id === card.id), 1);
+        bot.hasPlayed = true;
+        this.updatePower(bot);
+        this.gs.currentRoundPlays.push({ playerId: bot.id, playerName: bot.name, card, power: card.power });
+        this.broadcastLog(`👤 ${bot.name} menjatuhkan ${card.name} (${card.province}) - Power ${card.power}`);
+        this.checkWin(bot);
+        this.broadcastGameState();
+        setTimeout(() => this.startPhase2(), 1000);
+    }
+
+    private startPhase2() {
+        if (this.gs.gameOver) return;
+        this.gs.phase = 2;
+        this.gs.forcePickProcessing = false;
+        this.gs.isHandlingForcePick = false;
+        this.broadcastLog(`📍 Tahap 2 dimulai! Provinsi aktif: ${this.gs.currentProvince}`); 
+        const drawPileEmpty = this.gs.drawPile.length === 0;
+
+        this.getActivePlayers().forEach(player => {
+            if (player.hasPlayed) return;
+            const hasMatching = player.hand.some(c => c.province === this.gs.currentProvince);
+            if (!hasMatching) {
+                if (drawPileEmpty) {
+                    player.mustForcePick = true;
+                } else {
+                    player.mustDraw = true;
+                    if (!player.isBot) {
+                        this.setAfkTimer(player, () => {
+                            if (player.mustDraw && !player.hasPlayed) this.setPlayerAutoMode(player.id, true, 'AFK');
+                        });
+                    }
+                }
+            } else if (!player.isBot) {
+                this.setAfkTimer(player, () => {
+                    if (!player.hasPlayed && !player.mustDraw && !player.mustForcePick)
+                        this.setPlayerAutoMode(player.id, true, 'AFK');
+                });
+            }
+        });
+
+        this.broadcastGameState();
+        // Trigger aksi cepat untuk pemain yang sedang auto-mode (disconnect)
+        this.getActivePlayers()
+            .filter(p => !p.isBot && p.autoMode && !p.hasPlayed)
+            .forEach(p => setTimeout(() => this.runAutoAction(p), 500));
+        setTimeout(() => this.botsPlayPhase2(), 1000);
+    }
+
+    private botsPlayPhase2() {
+        const bots = this.getActivePlayers().filter(p => p.isBot && !p.hasPlayed);
+        if (bots.length === 0) { setTimeout(() => this.checkPhase2End(), 500); return; }
+        let done = 0;
+        bots.forEach((bot, idx) => {
+            setTimeout(() => {
+                this.botPlayPhase2(bot);
+                if (++done === bots.length) setTimeout(() => this.checkPhase2End(), 800);
+            }, (idx + 1) * 700);
+        });
+    }
+
+    private botPlayPhase2(bot: GamePlayer) {
+        if (bot.hasPlayed) return;
+        if (bot.mustDraw) {
+            if (this.dealCard(bot)) {
+                bot.mustDraw = false; bot.hasPlayed = true;
+                this.gs.currentRoundPlays.push({ playerId: bot.id, playerName: bot.name, card: null, power: 0 });
+                this.broadcastLog(`👤 ${bot.name} melakukan Draw Card`);
+            }
+            // Jika dealCard gagal, mustForcePick sudah di-set oleh dealCard → ditangani checkPhase2End
+            this.broadcastGameState(); return;
+        }
+        const matching = bot.hand.filter(c => c.province === this.gs.currentProvince);
+        if (matching.length > 0) {
+            // Level 1 (Bronze): mainkan kartu matching dengan power terbesar
+            // Level 2 & 3 (Gold/Platinum): mainkan power terkecil dulu (hemat high-power untuk Phase 1)
+            const level = bot.botLevel ?? 1;
+            let sortedMatching: Card[];
+            if (level === 1) {
+                sortedMatching = [...matching].sort((a, b) => b.power - a.power);
+            } else {
+                sortedMatching = [...matching].sort((a, b) => a.power - b.power);
+            }
+            const playable = sortedMatching.filter(c => !this.gs.topCard.some(t => t.id === c.id));
+            if (playable.length > 0) {
+                const card = playable[0];
+                bot.hand.splice(bot.hand.findIndex(c => c.id === card.id), 1);
+                this.gs.topCard.push(card);
+                bot.hasPlayed = true;
+                this.updatePower(bot);
+                this.gs.currentRoundPlays.push({ playerId: bot.id, playerName: bot.name, card, power: card.power });
+                this.checkWin(bot);
+                this.broadcastGameState();
+            } else {
+                // Edge case: semua matching card sudah ada di topCard (duplikat)
+                // Paksa draw/force-pick agar game tidak stuck
+                if (this.gs.drawPile.length === 0) {
+                    bot.mustForcePick = true;
+                } else if (this.dealCard(bot)) {
+                    bot.mustDraw = false; bot.hasPlayed = true;
+                    this.gs.currentRoundPlays.push({ playerId: bot.id, playerName: bot.name, card: null, power: 0 });
+                    this.broadcastLog(`👤 ${bot.name} melakukan Draw Card (fallback duplikat)`);
+                }
+                this.broadcastGameState();
+            }
+        }
+    }
+    private checkPhase2End() {
+        if (this.gs.gameOver || this.gs.isHandlingForcePick || this.gs.isEndingRound) return;
+        const human = this.gs.players.find(p => !p.isBot && !p.winner);
+        if (human && !human.hasPlayed && !human.mustForcePick && !human.autoMode) return;
+        const activePlayers = this.getActivePlayers();
+        if (!activePlayers.every(p => p.hasPlayed || p.mustForcePick)) return;
+        const fpPlayers = activePlayers.filter(p => p.mustForcePick && !p.hasPlayed);
+        if (fpPlayers.length === 0) { this.endRound(); return; }
+        if (this.gs.isHandlingForcePick) return;
+        this.gs.isHandlingForcePick = true;
+        setTimeout(() => this.handleForcePickDecision(fpPlayers), 500);
+    }
+
+    private handleForcePickDecision(fpPlayers: GamePlayer[]) {
+        const totalJatuhkan = this.gs.currentRoundPlays.filter(p => p.card?.province === this.gs.currentProvince).length;
+        const totalFP = fpPlayers.length;
+
+        if (totalJatuhkan >= totalFP) {
+            this.broadcastLog(`⚠️ Tidak ada pembebasan - semua Force Pick harus ambil kartu`);
+            this.processForcePick(fpPlayers, []);
+        } else {
+            const jumlahBebas = totalFP - totalJatuhkan;
+            const sorted = [...fpPlayers].sort((a, b) => {
+                if (a.hand.length !== b.hand.length) return b.hand.length - a.hand.length;
+                if (a.totalPower !== b.totalPower) return a.totalPower - b.totalPower;
+                return Math.random() - 0.5;
+            });
+            for (let i = 0; i < jumlahBebas; i++) {
+                sorted[i].mustForcePick = false; sorted[i].hasPlayed = true; sorted[i].freed = true;
+                this.broadcastLog(`✅ 👤 ${sorted[i].name} DIBEBASKAN dari Force Pick!`);
+            }
+            this.processForcePick(sorted.slice(jumlahBebas), sorted.slice(0, jumlahBebas));
+        }
+    }
+
+    private processForcePick(mustPickPlayers: GamePlayer[], freedPlayers: GamePlayer[]) {
+        const humanMustPick = mustPickPlayers.find(p => !p.isBot);
+        if (humanMustPick) {
+            this.gs.forcePickMode = true;
+            this.gs.forcePickPlayers = mustPickPlayers;
+            this.gs.forcePickProcessing = false;
+            this.broadcastLog(`⚠️ ${humanMustPick.name} harus memilih kartu dari Top Card!`);
+            this.broadcastGameState();
+            this.setAfkTimer(humanMustPick, () => {
+                if (!humanMustPick.hasPlayed) this.setPlayerAutoMode(humanMustPick.id, true, 'AFK');
+            });
+        } else {
+            mustPickPlayers.forEach(bot => {
+                if (this.gs.topCard.length > 0) {
+                    // Level 1: ambil power terkecil (pemula); Level 2: acak; Level 3: power terbesar
+                    const level = bot.botLevel ?? 1;
+                    let chosen;
+                    if (level === 1) {
+                        chosen = [...this.gs.topCard].sort((a,b) => a.power - b.power)[0];
+                    } else if (level === 2) {
+                        chosen = this.gs.topCard[Math.floor(Math.random() * this.gs.topCard.length)];
+                    } else {
+                        chosen = [...this.gs.topCard].sort((a,b) => b.power - a.power)[0];
+                    }
+                    this.gs.topCard.splice(this.gs.topCard.findIndex(c => c.id === chosen.id), 1);
+                    bot.hand.push(chosen); bot.mustForcePick = false; bot.hasPlayed = true;
+                    this.updatePower(bot);
+                    this.gs.currentRoundPlays.push({ playerId: bot.id, playerName: bot.name, card: chosen, power: chosen.power, isForcePickPlay: true });
+                    this.broadcastLog(`👤 ${bot.name} Mengambil kartu: ${chosen.name} (Power: ${chosen.power})`);
+                }
+            });
+            this.gs.forcePickMode = false;
+            this.broadcastGameState();
+            setTimeout(() => { this.gs.isHandlingForcePick = false; if (!this.gs.isEndingRound) this.endRound(); }, 500);
+        }
+    }
+
+    private handlePlayCardInternal(player: GamePlayer, card: Card) {
+        this.clearAfkTimer(player);
+        if (this.gs.phase === 1) {
+            player.hand.splice(player.hand.findIndex(c => c.id === card.id), 1);
+            player.hasPlayed = true;
+            this.gs.currentProvince = card.province; this.gs.topCard = [card];
+            this.updatePower(player);
+            this.gs.currentRoundPlays.push({ playerId: player.id, playerName: player.name, card, power: card.power });
+            this.broadcastLog(`👤 ${player.name} menjatuhkan ${card.name} (${card.province}) - Power ${card.power}`);
+            this.checkWin(player); this.broadcastGameState();
+            setTimeout(() => this.startPhase2(), 800);
+        } else {
+            player.hand.splice(player.hand.findIndex(c => c.id === card.id), 1);
+            this.gs.topCard.push(card); player.hasPlayed = true;
+            this.updatePower(player);
+            this.gs.currentRoundPlays.push({ playerId: player.id, playerName: player.name, card, power: card.power });
+            this.broadcastLog(`👤 ${player.name} menjatuhkan ${card.name} - Power ${card.power}`);
+            this.checkWin(player); this.broadcastGameState();
+            setTimeout(() => this.checkPhase2End(), 500);
+        }
+    }
+
+    private handleDrawCardInternal(player: GamePlayer) {
+        this.clearAfkTimer(player);
+        if (this.dealCard(player)) {
+            player.mustDraw = false; player.hasPlayed = true;
+            this.gs.currentRoundPlays.push({ playerId: player.id, playerName: player.name, card: null, power: 0 });
+            this.broadcastLog(`👤 ${player.name} melakukan Draw Card`);
+        } else {
+            // dealCard mengembalikan false → drawPile habis → mustForcePick sudah di-set
+            // Pastikan mustDraw di-clear agar checkPhase2End melihat kondisi yang benar
+            player.mustDraw = false;
+            this.broadcastLog(`⚠️ ${player.name} gagal Draw - Draw Pile habis → Force Pick`);
+        }
+        this.broadcastGameState();
+        setTimeout(() => this.checkPhase2End(), 500);
+    }
+
+    private handleForcePickCardInternal(player: GamePlayer, cardId: string) {
+        this.clearAfkTimer(player);
+        const card = this.gs.topCard.find(c => c.id === cardId);
+        if (!card) return;
+        this.gs.topCard.splice(this.gs.topCard.findIndex(c => c.id === cardId), 1);
+        player.hand.push(card);
+        player.mustForcePick = false;
+        player.hasPlayed = true;
+        this.updatePower(player);
+        this.gs.currentRoundPlays.push({ playerId: player.id, playerName: player.name, card, power: card.power, isForcePickPlay: true });
+        this.broadcastLog(`👤 ${player.name} Mengambil kartu: ${card.name} (Power: ${card.power})`);
+
+        this.gs.forcePickPlayers.filter(p => p.isBot && !p.hasPlayed).forEach(bot => {
+            if (this.gs.topCard.length > 0) {
+                // Level 1: ambil power terkecil (pemula); Level 2: acak; Level 3: power terbesar
+                const level = bot.botLevel ?? 1;
+                let chosen;
+                if (level === 1) {
+                    chosen = [...this.gs.topCard].sort((a,b) => a.power - b.power)[0];
+                } else if (level === 2) {
+                    chosen = this.gs.topCard[Math.floor(Math.random() * this.gs.topCard.length)];
+                } else {
+                    chosen = [...this.gs.topCard].sort((a,b) => b.power - a.power)[0];
+                }
+                this.gs.topCard.splice(this.gs.topCard.findIndex(c => c.id === chosen.id), 1);
+                bot.hand.push(chosen); bot.mustForcePick = false; bot.hasPlayed = true;
+                this.updatePower(bot);
+                this.gs.currentRoundPlays.push({ playerId: bot.id, playerName: bot.name, card: chosen, power: chosen.power, isForcePickPlay: true });
+                this.broadcastLog(`👤 ${bot.name} Mengambil kartu: ${chosen.name} (Power: ${chosen.power})`);
+            }
+        });
+        this.gs.forcePickMode = false;
+        this.broadcastGameState();
+        setTimeout(() => { this.gs.isHandlingForcePick = false; if (!this.gs.isEndingRound) this.endRound(); }, 500);
+    }
+
+    handlePlayerAction(playerId: string, action: any) {
+        const player = this.gs.players.find(p => p.id === playerId);
+        if (!player || player.winner || this.gs.gameOver) return;
+
+        if (player.autoMode) {
+            player.autoMode = false;
+            if (player.autoModeTimerId) { clearTimeout(player.autoModeTimerId); player.autoModeTimerId = undefined; }
+            player.disconnectedAt = undefined;
+            this.broadcastLog(`✅ ${player.name} kembali aktif`);
+            this.broadcastGameState();
+        }
+
+        if (action.type === 'PLAY_CARD') {
+            if (player.hasPlayed || player.isProcessingAction) { return; } // silent ignore — race condition biasa
+            const card = player.hand.find(c => c.id === action.cardId);
+            if (!card) { this.sendToPlayer(playerId, { type:'ERROR', message:'Kartu tidak ditemukan!' }); return; }
+            
+            if (this.gs.phase === 1) {
+                if (this.gs.phase1Player !== playerId) { this.sendToPlayer(playerId, { type:'ERROR', message:'Bukan giliran Anda di Tahap 1!' }); return; }
+            }
+
+            if (this.gs.phase === 2) {
+                if (player.mustDraw) { this.sendToPlayer(playerId, { type:'ERROR', message:'Anda harus Draw Card!' }); return; }
+                if (card.province !== this.gs.currentProvince) { this.sendToPlayer(playerId, { type:'ERROR', message:`Kartu bukan dari provinsi ${this.gs.currentProvince}!` }); return; }
+                if (this.gs.topCard.some(c => c.id === card.id)) { this.sendToPlayer(playerId, { type:'ERROR', message:'Kartu duplikat!' }); return; }
+            }
+            this.handlePlayCardInternal(player, card);
+
+        } else if (action.type === 'DRAW_CARD') {
+            if (!player.mustDraw || player.hasPlayed) { return; } // silent ignore
+            this.handleDrawCardInternal(player);
+        } else if (action.type === 'FORCE_PICK_CARD') {
+            if (!this.gs.forcePickMode) { return; } // silent ignore
+            if (!this.gs.forcePickPlayers.some(p => p.id === playerId)) { return; } // silent ignore
+            if (player.hasPlayed) { return; } // silent ignore
+            if (!this.gs.topCard.find(c => c.id === action.cardId)) { this.sendToPlayer(playerId, { type:'ERROR', message:'Kartu tidak ada di Top Card!' }); return; }
+            this.handleForcePickCardInternal(player, action.cardId);
+        }
+    }
+
+    handleSurrender(playerId: string) {
+        const player = this.gs.players.find(p => p.id === playerId);
+        if (!player || player.winner || player.isBot || this.gs.gameOver) return;
+
+        // Surrendering player mendapat rank TERBURUK yang belum dipakai.
+        // Contoh: 4 pemain, A menang (rank 1), B menyerah pertama → rank 4, C menyerah kedua → rank 3, dst.
+        const totalPlayers = this.gs.players.length;
+        const takenRanks   = new Set(this.gs.winners.map(w => w.rank));
+        let worstRank      = totalPlayers;
+        while (worstRank > 0 && takenRanks.has(worstRank)) worstRank--;
+        player.rank = worstRank > 0 ? worstRank : totalPlayers;
+        player.winner = true;
+        this.gs.winners.push(player);
+
+        // Simpan stats langsung saat menyerah — socket masih terbuka, sehingga
+        // SAVE_STATS_CLIENT bisa dikirim ke client jika server-save gagal.
+        // Flag statsSaved = true (optimistic) mencegah double-save di endGame().
+        if (player.userUid && player.userUid !== "BOT" && !this.isCustomRoom) {
+            player.statsSaved = true;
+            const _p = player;
+            savePlayerStats(_p.userUid, _p.name, _p.rank).then(ok => {
+                if (!ok) {
+                    _p.statsSaved = false;
+                    if (_p.socket && _p.socket.readyState === 1) {
+                        try { _p.socket.send(JSON.stringify({ type: 'SAVE_STATS_CLIENT', rank: _p.rank })); } catch (_) { /* noop */ }
+                    }
+                }
+            }).catch(e => { console.error(`❌ handleSurrender save exception uid=${_p.userUid}:`, e); _p.statsSaved = false; });
+        }
+
+        // Kartu player yang menyerah masuk ke discardPile
+        this.gs.discardPile.push(...player.hand);
+        this.broadcastLog(`🏳️ ${player.name} menyerah! (Peringkat ${player.rank})`);
+        player.hand = [];
+        player.totalPower = 0;
+        player.hasPlayed = true;
+
+        this.broadcastGameState();
+
+        // Cek apakah game harus berakhir
+        const remaining = this.getActivePlayers();
+        if (remaining.length <= 1) {
+            if (remaining.length === 1) {
+                const lastOne = remaining[0];
+                const totalPlayers = this.gs.players.length;
+                const allRanks = Array.from({length: totalPlayers}, (_, i) => i + 1);
+                const takenRanksAfterSurrender = this.gs.winners.map(w => w.rank);
+                lastOne.rank = allRanks.find(r => !takenRanksAfterSurrender.includes(r)) || 0;
+                lastOne.winner = true;
+                this.gs.winners.push(lastOne);
+                this.broadcastLog(`🏆 ${lastOne.name} menang sebagai Peringkat ${lastOne.rank}!`);
+            }
+            setTimeout(() => this.endGame(), 1000);
+        } else {
+            // Game masih berlanjut, pastikan ronde/fase lanjut
+            if (this.gs.phase === 2 && !this.gs.isHandlingForcePick && !this.gs.isEndingRound) {
+                setTimeout(() => this.checkPhase2End(), 500);
+            } else if (this.gs.phase === 1 && this.gs.phase1Player === playerId) {
+                // Jika yang menyerah adalah phase1Player, lanjutkan ke system play
+                this.gs.phase1Player = null;
+                setTimeout(() => this.systemPlayPhase1(), 500);
+            }
+        }
+    }
+    private endRound() {
+        if (this.gs.isEndingRound) return;
+        this.gs.isEndingRound = true;
+        this.clearAllAfkTimers();
+        this.gs.roundHistory.push({ round: this.gs.round, plays: [...this.gs.currentRoundPlays] });
+        this.broadcastLog(`🏁 Ronde ${this.gs.round} selesai`);
+
+        // Tunggu 1500ms agar kartu top card masih terlihat sebelum hilang dengan animasi
+        setTimeout(() => {
+            this.gs.discardPile.push(...this.gs.topCard);
+            this.gs.topCard = []; this.gs.currentProvince = null;
+            this.gs.forcePickMode = false; this.gs.forcePickPlayers = [];
+            this.broadcastGameState(); // ← trigger zoom-out di client
+
+            const activePlayers = this.getActivePlayers();
+            if (activePlayers.length === 0) {
+                setTimeout(() => { this.gs.isEndingRound = false; this.endGame(); }, 1000); return;
+            }
+            if (activePlayers.length === 1) {
+                const loser = activePlayers[0];
+                // Cari rank terkecil yang belum dipakai, agar tidak tabrakan dengan surrenderer
+                const takenRanks = new Set(this.gs.winners.map(w => w.rank));
+                let loserRank = 1;
+                while (takenRanks.has(loserRank)) loserRank++;
+                loser.rank = loserRank; loser.winner = true;
+                this.gs.winners.push(loser);
+                this.broadcastLog(`💀 ${loser.name} mendapat peringkat terakhir`);
+                setTimeout(() => { this.gs.isEndingRound = false; this.endGame(); }, 1000); return;
+            }
+            this.gs.round++;
+            this.broadcastLog(`🎮 === RONDE ${this.gs.round} DIMULAI ===`);
+            setTimeout(() => {
+                this.gs.isEndingRound = false; this.gs.isHandlingForcePick = false;
+                this.gs.forcePickProcessing = false; this.startPhase1();
+            }, 1500);
+        }, 1500);
+    }
+
+    private endGame() {
+        this.gs.gameOver = true;
+        this.clearAllAfkTimers();
+        // Assign rank untuk pemain yang belum punya rank, hindari tabrakan dengan surrenderer
+        const takenRanks = new Set(this.gs.winners.map(w => w.rank));
+        let nextRank = 1;
+        this.gs.players.filter(p => !p.winner).forEach(p => {
+            while (takenRanks.has(nextRank)) nextRank++;
+            p.rank = nextRank;
+            takenRanks.add(nextRank);
+            nextRank++;
+        });
+        // Safety net final: pastikan tidak ada pemain dengan rank 0
+        let safeMax = Math.max(0, ...this.gs.players.map(p => p.rank));
+        this.gs.players.filter(p => p.rank === 0).forEach(p => { p.rank = ++safeMax; });
+
+        this.broadcastToAll({
+            type: 'GAME_OVER',
+            players: this.gs.players.map(p => ({ id: p.id, name: p.name, rank: p.rank, hand: p.hand, isBot: p.isBot }))
+        });
+
+        // Rekam statistik provinsi per-match (fire-and-forget)
+        saveProvinceStats(this.selectedProvinces, this.gs.players, this.roomId, this.isCustomRoom);
+
+        // Server-side: simpan stats + rank setiap pemain manusia
+        // Kirim STATS_SAVED jika berhasil, SAVE_STATS_CLIENT jika gagal (fallback ke client)
+        this.gs.players
+            .filter(p => !p.isBot && p.userUid && p.userUid !== "BOT" && !p.statsSaved && !this.isCustomRoom)
+            .forEach(p => {
+                const sock = p.socket;
+                savePlayerStats(p.userUid, p.name, p.rank).then(ok => {
+                    // Kirim STATS_SAVED agar client tahu data Firebase sudah update
+                    if (sock && sock.readyState === 1) {
+                        try {
+                            sock.send(JSON.stringify({
+                                type: ok ? "STATS_SAVED" : "SAVE_STATS_CLIENT",
+                                rank: p.rank
+                            }));
+                        } catch (_) {}
+                    }
+                }).catch(e => { console.error(`❌ endGame save exception uid=${p.userUid}:`, e); });
+            });
+
+        // Beritahu matchmaking: game selesai, room bisa di-cleanup
+        if (this.onGameOver) setTimeout(() => this.onGameOver!(), 2000);
+    }
+
+    // Dipanggil ketika player secara eksplisit menekan "Kembali ke Home".
+    // Jika semua pemain manusia sudah meninggalkan match, langsung cleanup.
+    markPlayerLeft(playerId: string): boolean {
+        const player = this.gs.players.find(p => p.id === playerId);
+        if (!player || player.isBot) return false;
+        player.leftMatch = true;
+
+        const humans = this.gs.players.filter(p => !p.isBot);
+        const leftCount = humans.filter(p => p.leftMatch).length;
+        console.log(`🚪 ${player.name} keluar (${leftCount}/${humans.length} manusia pergi)`);
+
+        if (leftCount >= humans.length) {
+            this.cleanupMatch();
+            return true; // sinyal ke MatchmakingQueue untuk set status 'finished'
+        }
+        return false;
+    }
+
+    // Dipanggil ketika semua pemain manusia sudah pergi (tidak ada yang menonton).
+    // Hentikan semua timer dan tandai game selesai tanpa broadcast.
+    cleanupMatch() {
+        if (this.gs.gameOver) return;
+        this.gs.gameOver = true;
+        this.clearAllAfkTimers();
+        console.log(`🧹 Match ${this.roomId} dibersihkan (semua pemain manusia telah pergi)`);
+
+        // Safety net: simpan stats pemain manusia yang sudah punya rank tapi belum tersimpan.
+        // Kasus: pemain menang (checkWin) lalu langsung LEAVE_MATCH sebelum savePlayerStats selesai,
+        // atau koneksi putus sebelum endGame() dipanggil.
+        this.gs.players
+            .filter(p => !p.isBot && p.userUid && p.userUid !== "BOT" && !p.statsSaved && p.winner && p.rank > 0 && !this.isCustomRoom)
+            .forEach(p => {
+                p.statsSaved = true;
+                savePlayerStats(p.userUid, p.name, p.rank).then(ok => {
+                    if (!ok) p.statsSaved = false;
+                    console.log(`${ok ? '✅' : '⚠️'} cleanupMatch saveStats uid=${p.userUid} pos=${p.rank}`);
+                }).catch(e => { console.error(`❌ cleanupMatch save exception uid=${p.userUid}:`, e); p.statsSaved = false; });
+            });
+        // Bersihkan referensi spectator socket agar tidak memory leak
+        this.spectatorSockets = [];
+        this.spectatorUserUids = [];
+    }
+
+    getFullState() {
+        // Hitung stok rarity di draw pile vs total kartu di pool match ini
+        const rarityStock: Record<string, { remaining: number; total: number }> = {};
+        for (const rarity of RARITY_ORDER) rarityStock[rarity] = { remaining: 0, total: 0 };
+        // Total = semua kartu dari provinsi terpilih (pool awal match)
+        const cardsPool = this.selectedProvinces.length > 0
+            ? ALL_CARDS.filter(c => this.selectedProvinces.includes(c.province))
+            : ALL_CARDS;
+        for (const card of cardsPool) {
+            if (rarityStock[card.rarity]) rarityStock[card.rarity].total++;
+        }
+        // Remaining = yang masih ada di draw pile
+        for (const card of this.gs.drawPile) {
+            if (rarityStock[card.rarity]) rarityStock[card.rarity].remaining++;
+        }
+
+        return {
+            round: this.gs.round, phase: this.gs.phase, phase1Player: this.gs.phase1Player,
+            currentProvince: this.gs.currentProvince, topCard: this.gs.topCard,
+            drawPile: this.gs.drawPile.map(c => ({ id: c.id })),
+            discardPile: this.gs.discardPile.map(c => ({ id: c.id })),
+            forcePickMode: this.gs.forcePickMode,
+            forcePickPlayers: this.gs.forcePickPlayers.map(p => ({ id: p.id })),
+            forcePickProcessing: this.gs.forcePickProcessing,
+            isHandlingForcePick: this.gs.isHandlingForcePick,
+            isEndingRound: this.gs.isEndingRound,
+            players: this.gs.players.map(p => ({
+                id: p.id, name: p.name, isBot: p.isBot, hand: p.hand,
+                totalPower: p.totalPower, hasPlayed: p.hasPlayed, mustDraw: p.mustDraw,
+                mustForcePick: p.mustForcePick, freed: p.freed, winner: p.winner,
+                rank: p.rank, isProcessingAction: p.isProcessingAction,
+                autoMode: p.autoMode,
+                disconnectedAt: p.disconnectedAt,
+                drawLevel: p.drawLevel ?? 1, drawCount: p.drawCount ?? 0
+            })),
+            roundHistory: this.gs.roundHistory.slice(-10),
+            winners: this.gs.winners.map(p => ({ id: p.id, name: p.name, rank: p.rank })),
+            gameOver: this.gs.gameOver,
+            rarityStock // { mythic: {remaining:2,total:15}, legendary: {...}, ... }
+        };
+    }
+
+    broadcastGameState() {
+        const state = this.getFullState();
+        this.gs.players.forEach(p => {
+            if (!p.isBot && p.socket) {
+                try { p.socket.send(JSON.stringify({ type: 'GAME_STATE_UPDATE', state })); } catch(e) {}
+            }
+        });
+        this.spectatorSockets.forEach(s => {
+            if (s.readyState === 1) { try { s.send(JSON.stringify({ type: 'GAME_STATE_UPDATE', state, isSpectator: true })); } catch(e) {} }
+        });
+    }
+
+    private broadcastLog(message: string) {
+        console.log(`📝 LOG: ${message}`);
+        this.broadcastToAll({ type: 'LOG', message });
+    }
+
+    private sendToPlayer(playerId: string, message: any) {
+        const p = this.gs.players.find(p => p.id === playerId);
+        if (p && !p.isBot && p.socket) { try { p.socket.send(JSON.stringify(message)); } catch(e) {} }
+    }
+
+    broadcastToAll(message: any) {
+        this.gs.players.forEach(p => {
+            if (!p.isBot && p.socket) { try { p.socket.send(JSON.stringify(message)); } catch(e) {} }
+        });
+        this.spectatorSockets.forEach(s => {
+            if (s.readyState === 1) { try { s.send(JSON.stringify(message)); } catch(e) {} }
+        });
+    }
+
+    updatePlayerSocket(playerId: string, socket: WebSocket) {
+        const p = this.gs.players.find(p => p.id === playerId);
+        if (p) { p.socket = socket; console.log(`🔄 Socket updated: ${p.name}`); }
+    }
+
+    getPlayerById(playerId: string): GamePlayer | undefined {
+        return this.gs.players.find(p => p.id === playerId);
+    }
+
+    setPlayerAutoMode(playerId: string, enabled: boolean, reason = 'disconnect') {
+        const player = this.gs.players.find(p => p.id === playerId);
+        if (!player || player.isBot || player.winner) return;
+
+        player.autoMode = enabled;
+
+        if (enabled) {
+            player.disconnectedAt = Date.now();
+            console.log(`👤 AUTO-MODE ON: ${player.name}`);
+            this.broadcastLog(`👤 ${player.name} ${reason} - mode otomatis aktif`);
+            this.runAutoAction(player);
+        } else {
+            // Batalkan timer auto-action yang mungkin masih pending
+            if (player.autoModeTimerId) {
+                clearTimeout(player.autoModeTimerId);
+                player.autoModeTimerId = undefined;
+            }
+            player.disconnectedAt = undefined;
+            console.log(`👤 AUTO-MODE OFF: ${player.name}`);
+            this.broadcastLog(`✅ ${player.name} kembali ke pertandingan`);
+        }
+        this.broadcastGameState();
+    }
+
+    private runAutoAction(player: GamePlayer) {
+        if (!player.autoMode || player.hasPlayed || player.winner || this.gs.gameOver) return;
+        // Batalkan timer sebelumnya agar tidak ada duplikasi
+        if (player.autoModeTimerId) {
+            clearTimeout(player.autoModeTimerId);
+            player.autoModeTimerId = undefined;
+        }
+        const delay = 3000;
+        player.autoModeTimerId = setTimeout(() => {
+            player.autoModeTimerId = undefined;
+            if (!player.autoMode || player.hasPlayed || player.winner || this.gs.gameOver) return;
+
+            // Auto Phase 1
+            if (this.gs.phase === 1 && this.gs.phase1Player === player.id && !player.hasPlayed) {
+                if (player.hand.length > 0) {
+                    const card = [...player.hand].sort((a, b) => a.power - b.power)[0];
+                    this.broadcastLog(`👤 AUTO: ${player.name} menjatuhkan ${card.name}`);
+                    this.handlePlayCardInternal(player, card);
+                }
+                return;
+            }
+
+            // Auto Phase 2 - Draw Card
+            if (this.gs.phase === 2 && player.mustDraw && !player.hasPlayed) {
+                this.broadcastLog(`👤 AUTO: ${player.name} Draw Card`);
+                this.handleDrawCardInternal(player);
+                return;
+            }
+
+            // Auto Phase 2 - Play Card
+            if (this.gs.phase === 2 && !player.hasPlayed && !player.mustDraw && !player.mustForcePick) {
+                const matching = player.hand.filter(c => c.province === this.gs.currentProvince);
+                if (matching.length > 0) {
+                    const card = matching.sort((a, b) => a.power - b.power)[0];
+                    this.broadcastLog(`👤 AUTO: ${player.name} menjatuhkan ${card.name}`);
+                    this.handlePlayCardInternal(player, card);
+                }
+                return;
+            }
+
+            // Auto Force Pick
+            if (this.gs.phase === 2 && player.mustForcePick && !player.hasPlayed && this.gs.forcePickMode) {
+                if (this.gs.topCard.length > 0) {
+                    const card = [...this.gs.topCard].sort((a, b) => b.power - a.power)[0];
+                    this.broadcastLog(`👤 AUTO: ${player.name} Mengambil kartu: ${card.name}`);
+                    this.handleForcePickCardInternal(player, card.id);
+                }
+                return;
+            }
+        }, delay) as unknown as number;
+    }
+}
+
+interface Player {
+    id: string;
+    name: string;
+    socket: WebSocket;
+    joinTime: number;
+    timeoutId?: number;
+    userUid: string;
+    partyId?: string;
+    partySize?: number; // jumlah anggota party yang diharapkan (2 atau 3)
+}
+
+interface PartyLobby {
+    id: string; leaderId: string;
+    members: { uid: string; name: string; socket: WebSocket }[];
+}
+
+interface GameRoom {
+    id: string;
+    players: Player[];
+    bots: number;
+    status: 'starting' | 'playing' | 'finished';
+    gameEngine: GameEngine;
+    createdAt: number;
+    finishedAt?: number;
+}
+
+interface CustomRoomSlot { id: string; name: string; socket: WebSocket; userUid: string; }
+interface PendingCustomRoom {
+    id: string; hostUid: string; hostRole: 'pemain' | 'penonton';
+    players: CustomRoomSlot[];
+    botSlots: { [slotPos: number]: { level: number } };
+    spectatorSocket?: WebSocket; spectatorName?: string; spectatorUid?: string;
+    started: boolean; createdAt: number;
+}
+
+class MatchmakingQueue {
+    private queue: Player[] = [];
+    private rooms: Map<string, GameRoom> = new Map();
+    // partyId → set of playerIds yang sudah masuk antrian dengan partyId itu
+    private partyGroups: Map<string, Player[]> = new Map();
+    private partyGroupTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
+    private readonly MATCH_SIZE = 4;
+    private readonly WAIT_TIMEOUT = 30000;
+    // Timeout party: jika dalam 10 detik setelah party lengkap tidak ada 2 pemain lain → bot
+    private readonly PARTY_WAIT = 10000;
+
+    addPlayer(player: Player) {
+        console.log(`✅ ${player.name} masuk antrian. Total: ${this.queue.length + 1}`);
+        this.queue.push(player);
+
+        // Kelola partyGroups jika player membawa partyId
+        if (player.partyId) {
+            const group = this.partyGroups.get(player.partyId) || [];
+            group.push(player);
+            this.partyGroups.set(player.partyId, group);
+            // Tunggu sampai semua anggota party masuk (partySize = 2 atau 3)
+            const expected = player.partySize ?? 2;
+            if (group.length >= expected) {
+                this.tryMatchParty(player.partyId);
+                return;
+            }
+            // Safety timeout: jika dalam 20 detik tidak semua bergabung, mulai saja
+            if (group.length === 1) {
+                const pid = player.partyId!;
+                const t = setTimeout(() => {
+                    this.partyGroupTimeouts.delete(pid);
+                    const g = this.partyGroups.get(pid);
+                    if (g && g.length >= 2) this.tryMatchParty(pid);
+                }, 20000);
+                this.partyGroupTimeouts.set(pid, t);
+            }
+            return;
+        }
+
+        this.queue.forEach(p => {
+            try { p.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Mencari lawan... (${this.queue.length}/4)` })); } catch(e) {}
+        });
+        this.checkAndCreateMatch();
+    }
+
+    // Coba match party (2 anggota) + ambil sisa dari antrian umum / bot
+    private tryMatchParty(partyId: string) {
+        const partyPlayers = this.partyGroups.get(partyId);
+        if (!partyPlayers || partyPlayers.length < 2) return;
+        this.partyGroups.delete(partyId);
+        const _pt = this.partyGroupTimeouts.get(partyId);
+        if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(partyId); }
+
+        // Hapus anggota party dari antrian umum
+        partyPlayers.forEach(pp => {
+            const idx = this.queue.findIndex(q => q.id === pp.id);
+            if (idx !== -1) {
+                if (this.queue[idx].timeoutId) clearTimeout(this.queue[idx].timeoutId);
+                this.queue.splice(idx, 1);
+            }
+        });
+
+        // Ambil pemain lain dari antrian umum (non-party)
+        const othersNeeded = this.MATCH_SIZE - partyPlayers.length;
+        const others: Player[] = [];
+        for (let i = 0; i < this.queue.length && others.length < othersNeeded; i++) {
+            if (!this.queue[i].partyId) {
+                others.push(this.queue[i]);
+                if (this.queue[i].timeoutId) clearTimeout(this.queue[i].timeoutId);
+                this.queue.splice(i, 1);
+                i--;
+            }
+        }
+
+        const allPlayers = [...partyPlayers, ...others];
+        const botsNeeded = this.MATCH_SIZE - allPlayers.length;
+
+        if (others.length < othersNeeded && botsNeeded > 0) {
+            // Belum cukup pemain, tunggu PARTY_WAIT ms lalu isi bot
+            console.log(`⏳ Party ${partyId} menunggu ${othersNeeded - others.length} pemain lagi (${this.PARTY_WAIT / 1000}s)...`);
+            partyPlayers.forEach(p => {
+                try { p.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Party ditemukan! Mencari lawan... (${allPlayers.length}/4)` })); } catch(e) {}
+            });
+            setTimeout(() => {
+                // Cek lagi setelah timeout
+                const extraNeeded = this.MATCH_SIZE - allPlayers.length;
+                const extra: Player[] = [];
+                for (let i = 0; i < this.queue.length && extra.length < extraNeeded; i++) {
+                    if (!this.queue[i].partyId) {
+                        extra.push(this.queue[i]);
+                        if (this.queue[i].timeoutId) clearTimeout(this.queue[i].timeoutId);
+                        this.queue.splice(i, 1);
+                        i--;
+                    }
+                }
+                const finalPlayers = [...allPlayers, ...extra].filter(p => p.socket.readyState === 1);
+                const finalBots = this.MATCH_SIZE - finalPlayers.length;
+                finalPlayers.forEach(p => {
+                    try { p.socket.send(JSON.stringify({ type: 'MATCH_STARTING', humans: finalPlayers.length, bots: finalBots })); } catch(e) {}
+                });
+                this.createMatch(finalPlayers, finalBots);
+            }, this.PARTY_WAIT);
+            return;
+        }
+
+        allPlayers.forEach(p => {
+            try { p.socket.send(JSON.stringify({ type: 'MATCH_STARTING', humans: allPlayers.length, bots: botsNeeded })); } catch(e) {}
+        });
+        this.createMatch(allPlayers, botsNeeded);
+    }
+
+    private checkAndCreateMatch() {
+        if (this.queue.length >= this.MATCH_SIZE) {
+            const players = this.queue.splice(0, this.MATCH_SIZE);
+            players.forEach(p => {
+                if (p.timeoutId) clearTimeout(p.timeoutId);
+                try { p.socket.send(JSON.stringify({ type: 'MATCH_STARTING', humans: this.MATCH_SIZE, bots: 0 })); } catch(e) {}
+            });
+            this.createMatch(players, 0);
+        } else if (this.queue.length > 0 && !this.queue[0].timeoutId) {
+            this.queue[0].timeoutId = setTimeout(() => this.handleTimeout(), this.WAIT_TIMEOUT) as unknown as number;
+        }
+    }
+
+    private handleTimeout() {
+        // Hanya ambil pemain solo (tanpa partyId) — party harus menunggu partnernya
+        const soloPlayers = this.queue.filter(p => !p.partyId);
+        if (soloPlayers.length === 0) return;
+        // Hapus soloPlayers dari queue dan batalkan timeoutId masing-masing
+        soloPlayers.forEach(p => {
+            const idx = this.queue.findIndex(q => q.id === p.id);
+            if (idx !== -1) {
+                if (this.queue[idx].timeoutId) clearTimeout(this.queue[idx].timeoutId);
+                this.queue.splice(idx, 1);
+            }
+        });
+        const botsNeeded = this.MATCH_SIZE - soloPlayers.length;
+        soloPlayers.forEach(p => {
+            try { p.socket.send(JSON.stringify({ type: 'MATCH_STARTING', humans: soloPlayers.length, bots: botsNeeded })); } catch(e) {}
+        });
+        this.createMatch(soloPlayers, botsNeeded).catch(e => {
+            console.error('❌ createMatch gagal:', e);
+            soloPlayers.forEach(p => {
+                try { p.socket.send(JSON.stringify({ type: 'ERROR', message: 'Gagal memulai match, coba lagi.' })); } catch(_) {}
+            });
+        });
+    }
+
+    private async createMatch(players: Player[], botCount: number) {
+        const roomId = `room_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        const gameEngine = new GameEngine(roomId);
+
+        // Pilih 16 provinsi: Bangka Belitung SELALU hadir + 15 weighted (jarang muncul diprioritaskan)
+        const MANDATORY_PROVINCE = 'Bangka Belitung';
+        const selectedProvinces = [MANDATORY_PROVINCE, ...await pickWeightedProvinces()];
+        gameEngine.setSelectedProvinces(selectedProvinces);
+
+        players.forEach(p => gameEngine.addPlayer({
+            id: p.id, name: p.name, isBot: false, socket: p.socket, userUid: p.userUid
+        }));
+
+        // Kirim daftar provinsi terpilih ke semua pemain segera setelah match ditemukan
+        players.forEach(p => {
+            try { p.socket.send(JSON.stringify({ type: 'PROVINCES_SELECTED', provinces: selectedProvinces, mandatory: MANDATORY_PROVINCE, roomId, playerId: p.id })); } catch(e) {}
+        });
+
+        // Tentukan bot level berdasarkan rank tertinggi pemain manusia
+        let botLevel = 1;
+        if (botCount > 0) {
+            try {
+                const rankResults = await Promise.all(
+                    players.map(p => p.userUid ? fbRead(`/users/${p.userUid}/rankData`) : Promise.resolve(null))
+                );
+                for (const rd of rankResults) {
+                    if (!rd?.rankName) continue;
+                    const rn: string = rd.rankName;
+                    if (rn.startsWith("Platinum")) { botLevel = 3; break; }
+                    if ((rn.startsWith("Gold") || rn.startsWith("Diamond")) && botLevel < 2) botLevel = 2;
+                }
+            } catch (e) {
+                console.warn("⚠️ Gagal fetch rank untuk bot level, pakai level 1:", e);
+            }
+            console.log(`🤖 Bot Level ${botLevel} dipilih untuk match ${roomId}`);
+        }
+
+        for (let i = 0; i < botCount; i++) gameEngine.addBot(GameEngine.pickBotName(), botLevel);
+
+        const room: GameRoom = { id: roomId, players, bots: botCount, status: 'starting', gameEngine, createdAt: Date.now() };
+        this.rooms.set(roomId, room);
+
+        // Callback: tandai room finished saat game over
+        gameEngine.onGameOver = () => {
+            room.status = 'finished';
+            room.finishedAt = Date.now();
+            console.log(`🏁 Room ${roomId} selesai - akan di-cleanup dalam 5 menit`);
+        };
+
+        // 6 detik: cukup untuk pemain melihat provinsi sebelum game dimulai
+        setTimeout(() => {
+            try {
+                room.status = 'playing';
+                gameEngine.startGame();
+                const startState = gameEngine.getFullState();
+                players.forEach(p => {
+                    try { p.socket.send(JSON.stringify({ type: 'GAME_STARTED', roomId, playerId: p.id, state: startState })); } catch(e) {}
+                });
+            } catch (err) {
+                console.error(`❌ startGame error room ${roomId}:`, err);
+                room.status = 'finished';
+                players.forEach(p => {
+                    try { p.socket.send(JSON.stringify({ type: 'ERROR', message: 'Gagal memulai pertandingan, silakan coba lagi.' })); } catch(_) {}
+                });
+            }
+        }, 6000);
+    }
+
+    removePlayer(playerId: string) {
+        const idx = this.queue.findIndex(p => p.id === playerId);
+        if (idx !== -1) {
+            const p = this.queue[idx];
+            if (p.timeoutId) clearTimeout(p.timeoutId);
+            // Bersihkan dari partyGroups jika ada
+            if (p.partyId) {
+                const group = this.partyGroups.get(p.partyId);
+                if (group) {
+                    const gi = group.findIndex(gp => gp.id === playerId);
+                    if (gi !== -1) group.splice(gi, 1);
+                    if (group.length === 0) {
+                        this.partyGroups.delete(p.partyId);
+                        const _pt = this.partyGroupTimeouts.get(p.partyId);
+                        if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
+                    }
+                }
+            }
+            this.queue.splice(idx, 1);
+            // Beritahu sisa pemain di antrian dengan jumlah terkini
+            this.queue.forEach(qp => {
+                try { qp.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Mencari lawan... (${this.queue.length}/4)` })); } catch(_) {}
+            });
+            // Re-arm timeout untuk queue[0] yang baru jika belum ada
+            if (this.queue.length > 0 && !this.queue[0].timeoutId) {
+                this.queue[0].timeoutId = setTimeout(() => this.handleTimeout(), this.WAIT_TIMEOUT) as unknown as number;
+            }
+        }
+    }
+
+    getRoom(roomId: string) { return this.rooms.get(roomId); }
+
+    rejoinRoom(roomId: string, playerId: string, playerName: string, userUid: string, socket: WebSocket): boolean {
+        const room = this.rooms.get(roomId);
+        // Izinkan rejoin saat status 'starting' maupun 'playing'
+        if (!room || (room.status !== 'playing' && room.status !== 'starting')) return false;
+
+        // Validasi: pastikan userUid cocok dengan player yang punya playerId ini
+        const gamePlayer = room.gameEngine.getPlayerById(playerId);
+        if (!gamePlayer) return false;
+        if (gamePlayer.userUid && gamePlayer.userUid !== userUid) {
+            console.log(`🚫 REJOIN DITOLAK: uid tidak cocok. Expected ${gamePlayer.userUid}, got ${userUid}`);
+            return false;
+        }
+
+        // Bersihkan flag leftMatch agar tidak salah di-cleanup
+        gamePlayer.leftMatch = false;
+
+        room.gameEngine.updatePlayerSocket(playerId, socket);
+        const rp = room.players.find(p => p.id === playerId);
+        if (rp) rp.socket = socket;
+        return true;
+    }
+
+    // Cleanup room yang sudah 'finished' (5 menit) atau stuck di 'playing'/'starting' (2 jam)
+    cleanupFinishedRooms() {
+        const now = Date.now();
+        const MAX_FINISHED_AGE  = 5 * 60 * 1000;        // 5 menit setelah selesai (ranked)
+        const MAX_PLAYING_AGE   = 2 * 60 * 60 * 1000;   // 2 jam — mencegah memory leak room stuck
+
+        // Cleanup active/finished game rooms (ranked)
+        // Custom room sudah di-delete oleh onGameOver callback setelah 60 detik
+        this.rooms.forEach((room, roomId) => {
+            if (room.status === 'finished') {
+                const finishedTime = room.finishedAt ?? room.createdAt;
+                if ((now - finishedTime) > MAX_FINISHED_AGE) {
+                    console.log(`🗑️ Cleanup finished room ${roomId}`);
+                    this.rooms.delete(roomId);
+                }
+            } else if ((now - room.createdAt) > MAX_PLAYING_AGE) {
+                // Room stuck di 'playing' atau 'starting' lebih dari 2 jam
+                console.log(`🗑️ Cleanup stale room ${roomId} (status: ${room.status}, age: ${Math.round((now - room.createdAt)/60000)}m)`);
+                try { room.gameEngine.cleanupMatch(); } catch(_) {}
+                this.rooms.delete(roomId);
+            }
+        });
+
+        // TTL fallback: hapus pending custom room yang terlalu lama tidak dimulai (2 jam)
+        const MAX_PENDING_AGE = 2 * 60 * 60 * 1000;
+        this.pendingCustomRooms.forEach((room, roomId) => {
+            if (!room.started && (now - room.createdAt) > MAX_PENDING_AGE) {
+                console.log(`🗑️ Cleanup stale pending custom room ${roomId}`);
+                this.pendingCustomRooms.delete(roomId);
+            }
+        });
+    }
+
+    getStats() {
+        const playing = [...this.rooms.values()].filter(r => r.status === 'playing').length;
+        const finished = [...this.rooms.values()].filter(r => r.status === 'finished').length;
+        return { waiting: this.queue.length, activeRooms: playing, finishedRooms: finished, totalCards: ALL_CARDS.length };
+    }
+
+    setPlayerAutoModeInAllRooms(playerId: string, enabled: boolean) {
+        this.rooms.forEach((room) => {
+            if (room.status === 'playing') {
+                // Validasi player benar-benar ada di room ini sebelum ubah auto mode
+                const gp = room.gameEngine.getPlayerById(playerId);
+                if (gp) room.gameEngine.setPlayerAutoMode(playerId, enabled);
+            }
+        });
+    }
+
+    // Cari room aktif berdasarkan userUid — untuk support login di device berbeda
+    findRoomByUserUid(userUid: string): { roomId: string; playerId: string; playerName: string; isCustomRoom: boolean; isSpectator?: boolean } | null {
+        if (!userUid || userUid === 'BOT') return null;
+        for (const [roomId, room] of this.rooms) {
+            if (room.status !== 'playing' && room.status !== 'starting') continue;
+            const player = room.gameEngine.gs.players.find(p => !p.isBot && p.userUid === userUid && !p.leftMatch);
+            if (player) return { roomId, playerId: player.id, playerName: player.name, isCustomRoom: room.gameEngine.isCustomRoom };
+            // Cek apakah userUid ini adalah spectator di room ini
+            if (room.gameEngine.spectatorUserUids.includes(userUid)) {
+                return { roomId, playerId: '', playerName: '', isCustomRoom: room.gameEngine.isCustomRoom, isSpectator: true };
+            }
+        }
+        return null;
+    }
+
+    // Rejoin sebagai spectator — tambahkan kembali socket ke spectatorSockets
+    rejoinAsSpectator(roomId: string, userUid: string, socket: WebSocket): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room || (room.status !== 'playing' && room.status !== 'starting')) return false;
+        if (!room.gameEngine.spectatorUserUids.includes(userUid)) return false;
+        room.gameEngine.spectatorSockets.push(socket);
+        return true;
+    }
+
+    // ============================
+    // CUSTOM ROOM (KOSTUM)
+    // ============================
+    private pendingCustomRooms: Map<string, PendingCustomRoom> = new Map();
+    // uid → { name, socket } — hanya pemain yang idle di home screen
+    private onlineRegistry: Map<string, { name: string; socket: WebSocket }> = new Map();
+    // inviteId → { fromUid, fromName, roomId, toUid }
+    private pendingInvites: Map<string, { fromUid: string; fromName: string; roomId: string; toUid: string }> = new Map();
+    // Party lobby untuk Main Online (ranked)
+    private partyLobbies: Map<string, PartyLobby> = new Map();
+    // partyInviteId → { fromUid, fromName, partyId, toUid }
+    private pendingPartyInvites: Map<string, { fromUid: string; fromName: string; partyId: string; toUid: string }> = new Map();
+
+    getPendingCustomRoom(roomId: string): PendingCustomRoom | undefined {
+        return this.pendingCustomRooms.get(roomId);
+    }
+
+    createPendingCustomRoom(hostName: string, hostUid: string, hostRole: 'pemain' | 'penonton', hostSocket: WebSocket): { roomId: string; hostPlayerId?: string } {
+        // Pastikan roomId unik (sangat jarang collision tapi defensif)
+        let roomId: string;
+        do { roomId = `cr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`; }
+        while (this.pendingCustomRooms.has(roomId) || this.rooms.has(roomId));
+        const entry: PendingCustomRoom = { id: roomId, hostUid, hostRole, players: [], botSlots: {}, started: false, createdAt: Date.now() };
+        let hostPlayerId: string | undefined;
+        if (hostRole === 'pemain') {
+            hostPlayerId = `crp_${Date.now()}`;
+            entry.players.push({ id: hostPlayerId, name: hostName, socket: hostSocket, userUid: hostUid });
+        } else {
+            entry.spectatorSocket = hostSocket;
+            entry.spectatorName = hostName;
+            entry.spectatorUid = hostUid;
+        }
+        this.pendingCustomRooms.set(roomId, entry);
+        console.log(`🎭 Custom room dibuat: ${roomId} | ${hostName} (${hostRole})`);
+        return { roomId, hostPlayerId };
+    }
+
+    joinPendingCustomRoom(roomId: string, playerName: string, playerUid: string, socket: WebSocket): { success: boolean; playerId?: string; error?: string } {
+        const room = this.pendingCustomRooms.get(roomId);
+        if (!room) {
+            // Room mungkin sudah pindah ke this.rooms karena game sudah dimulai
+            const startedRoom = this.rooms.get(roomId);
+            if (startedRoom) return { success: false, error: 'Pertandingan sudah dimulai' };
+            return { success: false, error: 'Room tidak ditemukan' };
+        }
+        if (room.started) return { success: false, error: 'Pertandingan sudah dimulai' };
+        if (room.players.length + Object.keys(room.botSlots).length >= 4) return { success: false, error: 'Room sudah penuh (4 slot terisi)' };
+        // Cegah player yang sama masuk dua kali (misal dua tab browser)
+        if (room.players.some(p => p.userUid === playerUid)) return { success: false, error: 'Kamu sudah ada di room ini' };
+        let pid: string;
+        do { pid = `crp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
+        while (room.players.some(p => p.id === pid));
+        room.players.push({ id: pid, name: playerName, socket, userUid: playerUid });
+        return { success: true, playerId: pid };
+    }
+
+    broadcastPendingCustomRoomUpdate(roomId: string) {
+        const room = this.pendingCustomRooms.get(roomId);
+        if (!room) return;
+        const humanSlots = room.players.map((p, i) => ({ slot: i + 1, name: p.name, uid: p.userUid, isBot: false }));
+        const botSlotsInfo = Object.entries(room.botSlots).map(([pos, b]) => ({
+            slot: parseInt(pos),
+            name: `Bot Lv${b.level}`, level: b.level, isBot: true, uid: null
+        }));
+        const totalSlots = humanSlots.length + botSlotsInfo.length;
+        const msg = JSON.stringify({
+            type: 'CUSTOM_ROOM_UPDATE', roomId,
+            slots: [...humanSlots, ...botSlotsInfo],
+            totalSlots, hostRole: room.hostRole, hostUid: room.hostUid
+        });
+        room.players.forEach(p => { if (p.socket.readyState === 1) { try { p.socket.send(msg); } catch(_) {} } });
+        if (room.spectatorSocket?.readyState === 1) { try { room.spectatorSocket.send(msg); } catch(_) {} }
+    }
+
+    async startCustomRoomGame(roomId: string): Promise<boolean> {
+        const room = this.pendingCustomRooms.get(roomId);
+        const totalSlots = (room?.players.length ?? 0) + Object.keys(room?.botSlots ?? {}).length;
+        const minHumans = room?.hostRole === 'penonton' ? 0 : 1;
+        if (!room || room.started || totalSlots < 2 || room.players.length < minHumans) return false;
+        room.started = true;
+
+        try {
+            const gameEngine = new GameEngine(roomId);
+            gameEngine.isCustomRoom = true;
+            if (room.spectatorSocket) gameEngine.addSpectator(room.spectatorSocket, room.spectatorUid);
+
+            const MANDATORY_PROVINCE = 'Bangka Belitung';
+            const selectedProvinces = [MANDATORY_PROVINCE, ...await pickWeightedProvinces()];
+            gameEngine.setSelectedProvinces(selectedProvinces);
+
+            room.players.forEach(p => gameEngine.addPlayer({ id: p.id, name: p.name, isBot: false, socket: p.socket, userUid: p.userUid }));
+            // Tambahkan bot sesuai slot yang sudah ditentukan host
+            Object.values(room.botSlots).forEach(b => gameEngine.addBot(GameEngine.pickBotName(), b.level));
+
+            const gameRoom: GameRoom = {
+                id: roomId,
+                players: room.players.map(p => ({ id: p.id, name: p.name, socket: p.socket, joinTime: Date.now(), userUid: p.userUid })),
+                bots: Object.keys(room.botSlots).length, status: 'starting', gameEngine, createdAt: Date.now()
+            };
+            this.rooms.set(roomId, gameRoom);
+            this.pendingCustomRooms.delete(roomId); // hapus dari pending hanya jika setup berhasil
+            gameEngine.onGameOver = () => {
+                gameRoom.status = 'finished';
+                gameRoom.finishedAt = Date.now();
+                // Custom room tidak perlu disimpan lama — hapus dari memori setelah 60 detik
+                // (cukup waktu untuk semua message game-over sampai ke client)
+                setTimeout(() => { this.rooms.delete(roomId); }, 60_000);
+            };
+
+            room.players.forEach(p => { if (p.socket.readyState === 1) { try { p.socket.send(JSON.stringify({ type: 'PROVINCES_SELECTED', provinces: selectedProvinces, mandatory: MANDATORY_PROVINCE, roomId, playerId: p.id })); } catch(_) {} } });
+            if (room.spectatorSocket?.readyState === 1) { try { room.spectatorSocket.send(JSON.stringify({ type: 'PROVINCES_SELECTED', provinces: selectedProvinces, mandatory: MANDATORY_PROVINCE, roomId, playerId: null })); } catch(_) {} }
+
+            setTimeout(() => {
+                gameRoom.status = 'playing';
+                gameEngine.startGame();
+                const state = gameEngine.getFullState();
+                room.players.forEach(p => {
+                    if (p.socket.readyState === 1) {
+                        try { p.socket.send(JSON.stringify({ type: 'GAME_STARTED', roomId, playerId: p.id, state, isCustomRoom: true })); } catch(_) {}
+                    }
+                });
+                if (room.spectatorSocket?.readyState === 1) {
+                    try { room.spectatorSocket.send(JSON.stringify({ type: 'GAME_STARTED', roomId, playerId: null, isSpectator: true, state, isCustomRoom: true })); } catch(_) {}
+                }
+            }, 6000);
+
+            console.log(`🎭 Custom room game started: ${roomId} | ${room.players.length} pemain`);
+            return true;
+        } catch (error) {
+            // Rollback: biarkan room tetap di pendingCustomRooms agar bisa dicoba lagi
+            console.error(`❌ Gagal start custom room ${roomId}:`, error);
+            room.started = false;
+            this.rooms.delete(roomId);
+            return false;
+        }
+    }
+
+    // ============================
+    // PARTY LOBBY (Main Online ranked — maks 3 orang)
+    // ============================
+    createPartyLobby(leaderUid: string, leaderName: string, socket: WebSocket): string {
+        let id: string;
+        do { id = `party_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
+        while (this.partyLobbies.has(id));
+        this.partyLobbies.set(id, { id, leaderId: leaderUid, members: [{ uid: leaderUid, name: leaderName, socket }] });
+        return id;
+    }
+
+    inviteToParty(partyId: string, fromUid: string, toUid: string): { success: boolean; error?: string } {
+        const party = this.partyLobbies.get(partyId);
+        if (!party) return { success: false, error: 'Party tidak ditemukan' };
+        if (party.leaderId !== fromUid) return { success: false, error: 'Hanya leader yang bisa mengundang' };
+        if (party.members.length >= 3) return { success: false, error: 'Party sudah penuh (maks 3 pemain)' };
+        if (party.members.some(m => m.uid === toUid)) return { success: false, error: 'Pemain sudah ada di party' };
+        const target = this.onlineRegistry.get(toUid);
+        if (!target || target.socket.readyState !== 1) return { success: false, error: 'Pemain tidak tersedia (offline/sibuk)' };
+        const fromMember = party.members.find(m => m.uid === fromUid);
+        const inviteId = `pinv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        this.pendingPartyInvites.set(inviteId, { fromUid, fromName: fromMember?.name ?? 'Leader', partyId, toUid });
+        try {
+            target.socket.send(JSON.stringify({ type: 'PARTY_INVITE', inviteId, partyId, fromName: fromMember?.name ?? 'Leader' }));
+        } catch (_) {
+            this.pendingPartyInvites.delete(inviteId);
+            return { success: false, error: 'Gagal mengirim undangan' };
+        }
+        setTimeout(() => this.pendingPartyInvites.delete(inviteId), 30000);
+        return { success: true };
+    }
+
+    respondToPartyInvite(inviteId: string, toUid: string, accepted: boolean, socket: WebSocket, playerName: string)
+        : { success: boolean; partyId?: string; partySize?: number; error?: string } {
+        const invite = this.pendingPartyInvites.get(inviteId);
+        if (!invite || invite.toUid !== toUid) return { success: false, error: 'Undangan tidak valid atau sudah kedaluwarsa' };
+        this.pendingPartyInvites.delete(inviteId);
+        const party = this.partyLobbies.get(invite.partyId);
+        const notifyLeader = (msg: object) => {
+            if (!party) return;
+            const leader = party.members.find(m => m.uid === invite.fromUid);
+            if (leader?.socket.readyState === 1) { try { leader.socket.send(JSON.stringify(msg)); } catch(_) {} }
+        };
+        if (!accepted) {
+            notifyLeader({ type: 'PARTY_INVITE_DECLINED', toName: playerName });
+            return { success: false, error: 'Undangan ditolak' };
+        }
+        if (!party || party.members.length >= 3) {
+            notifyLeader({ type: 'PARTY_INVITE_DECLINED', toName: playerName, reason: 'Party sudah penuh' });
+            return { success: false, error: 'Party sudah penuh' };
+        }
+        party.members.push({ uid: toUid, name: playerName, socket });
+        return { success: true, partyId: invite.partyId, partySize: party.members.length };
+    }
+
+    broadcastPartyUpdate(partyId: string) {
+        const party = this.partyLobbies.get(partyId);
+        if (!party) return;
+        const msg = JSON.stringify({
+            type: 'PARTY_UPDATE', partyId,
+            members: party.members.map(m => ({ uid: m.uid, name: m.name })),
+            leaderId: party.leaderId
+        });
+        party.members.forEach(m => { if (m.socket.readyState === 1) { try { m.socket.send(msg); } catch(_) {} } });
+    }
+
+    disbandParty(partyId: string) {
+        const party = this.partyLobbies.get(partyId);
+        if (!party) return;
+        const msg = JSON.stringify({ type: 'PARTY_DISBANDED' });
+        party.members.forEach(m => { if (m.socket.readyState === 1) { try { m.socket.send(msg); } catch(_) {} } });
+        this.partyLobbies.delete(partyId);
+    }
+
+    leavePartyLobby(partyId: string, uid: string) {
+        const party = this.partyLobbies.get(partyId);
+        if (!party) return;
+        if (party.leaderId === uid) {
+            // Leader keluar → bubarkan party
+            this.disbandParty(partyId);
+        } else {
+            const idx = party.members.findIndex(m => m.uid === uid);
+            if (idx !== -1) party.members.splice(idx, 1);
+            this.broadcastPartyUpdate(partyId);
+        }
+    }
+
+    // Kirim sinyal ke semua anggota untuk masuk antrian dengan partyId bersama
+    startPartyQueue(partyId: string, leaderUid: string): { success: boolean; sharedPartyId?: string; partySize?: number; error?: string } {
+        const party = this.partyLobbies.get(partyId);
+        if (!party) return { success: false, error: 'Party tidak ditemukan' };
+        if (party.leaderId !== leaderUid) return { success: false, error: 'Hanya leader yang bisa memulai antrian' };
+        if (party.members.length < 2) return { success: false, error: 'Party butuh minimal 2 pemain' };
+        const sharedPartyId = `qp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const size = party.members.length;
+        // Beritahu semua anggota untuk segera kirim JOIN_MATCHMAKING dengan sharedPartyId
+        party.members.forEach(m => {
+            this.unregisterOnline(m.uid);
+            if (m.socket.readyState === 1) {
+                try { m.socket.send(JSON.stringify({ type: 'PARTY_QUEUING', sharedPartyId, partySize: size })); } catch(_) {}
+            }
+        });
+        this.partyLobbies.delete(partyId);
+        return { success: true, sharedPartyId, partySize: size };
+    }
+
+    // ============================
+    // BOT SLOT MANAGEMENT
+    // ============================
+    addBotSlotToCustomRoom(roomId: string, level: number, requestingUid: string, slotPosition: number): { success: boolean; error?: string } {
+        const room = this.pendingCustomRooms.get(roomId);
+        if (!room || room.started) return { success: false, error: 'Room tidak valid' };
+        if (room.hostUid !== requestingUid) return { success: false, error: 'Hanya host yang bisa menambah bot' };
+        const minSlot = room.hostRole === 'pemain' ? 2 : 1;
+        if (slotPosition < minSlot || slotPosition > 4) return { success: false, error: 'Posisi slot tidak valid' };
+        if (room.botSlots[slotPosition]) return { success: false, error: 'Slot sudah ada bot' };
+        const humanAtSlot = room.players.some((_, i) => i + 1 === slotPosition);
+        if (humanAtSlot) return { success: false, error: 'Slot sudah ditempati pemain' };
+        if (room.players.length + Object.keys(room.botSlots).length >= 4) return { success: false, error: 'Room sudah penuh (maks 4 slot)' };
+        if (level < 1 || level > 3) return { success: false, error: 'Level bot harus 1–3' };
+        room.botSlots[slotPosition] = { level };
+        return { success: true };
+    }
+
+    removeBotSlotFromCustomRoom(roomId: string, slotPosition: number, requestingUid: string): { success: boolean; error?: string } {
+        const room = this.pendingCustomRooms.get(roomId);
+        if (!room || room.started) return { success: false, error: 'Room tidak valid' };
+        if (room.hostUid !== requestingUid) return { success: false, error: 'Hanya host yang bisa menghapus bot' };
+        if (!room.botSlots[slotPosition]) return { success: false, error: 'Tidak ada bot di slot tersebut' };
+        delete room.botSlots[slotPosition];
+        return { success: true };
+    }
+
+    // ============================
+    // ONLINE REGISTRY (idle players di home screen)
+    // ============================
+    registerOnline(userUid: string, name: string, socket: WebSocket) {
+        this.onlineRegistry.set(userUid, { name, socket });
+    }
+
+    unregisterOnline(userUid: string) {
+        this.onlineRegistry.delete(userUid);
+    }
+
+    getOnlinePlayers(excludeUid: string): { uid: string; name: string }[] {
+        const result: { uid: string; name: string }[] = [];
+        this.onlineRegistry.forEach((v, uid) => {
+            if (uid !== excludeUid && v.socket.readyState === 1) result.push({ uid, name: v.name });
+        });
+        return result;
+    }
+
+    // ============================
+    // INVITE SYSTEM
+    // ============================
+    invitePlayerToCustomRoom(roomId: string, fromUid: string, toUid: string): { success: boolean; error?: string } {
+        const room = this.pendingCustomRooms.get(roomId);
+        if (!room || room.started) return { success: false, error: 'Room tidak valid' };
+        if (room.hostUid !== fromUid) return { success: false, error: 'Hanya host yang bisa mengundang' };
+        if (room.players.length + Object.keys(room.botSlots).length >= 4) return { success: false, error: 'Room sudah penuh' };
+        if (room.players.some(p => p.userUid === toUid)) return { success: false, error: 'Pemain sudah ada di room' };
+        const target = this.onlineRegistry.get(toUid);
+        if (!target || target.socket.readyState !== 1) return { success: false, error: 'Pemain tidak tersedia (offline/sibuk)' };
+        const fromPlayer = room.players.find(p => p.userUid === fromUid);
+        const inviteId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        this.pendingInvites.set(inviteId, { fromUid, fromName: fromPlayer?.name ?? 'Host', roomId, toUid });
+        try {
+            target.socket.send(JSON.stringify({
+                type: 'ROOM_INVITE', inviteId, roomId,
+                fromName: fromPlayer?.name ?? 'Host'
+            }));
+        } catch (_) {
+            this.pendingInvites.delete(inviteId);
+            return { success: false, error: 'Gagal mengirim undangan' };
+        }
+        // Auto-expire setelah 30 detik
+        setTimeout(() => this.pendingInvites.delete(inviteId), 30000);
+        return { success: true };
+    }
+
+    respondToInvite(inviteId: string, toUid: string, accepted: boolean, socket: WebSocket, playerName: string)
+        : { success: boolean; roomId?: string; playerId?: string; error?: string } {
+        const invite = this.pendingInvites.get(inviteId);
+        if (!invite || invite.toUid !== toUid) return { success: false, error: 'Undangan tidak valid atau sudah kedaluwarsa' };
+        this.pendingInvites.delete(inviteId);
+        // Kirim notifikasi ke host
+        const room = this.pendingCustomRooms.get(invite.roomId);
+        const notifyHost = (msg: object) => {
+            if (!room) return;
+            const hostPlayer = room.players.find(p => p.userUid === invite.fromUid);
+            if (hostPlayer?.socket.readyState === 1) {
+                try { hostPlayer.socket.send(JSON.stringify(msg)); } catch (_) {}
+            }
+        };
+        if (!accepted) {
+            notifyHost({ type: 'INVITE_DECLINED', toName: playerName });
+            return { success: false, error: 'Undangan ditolak' };
+        }
+        const joinResult = this.joinPendingCustomRoom(invite.roomId, playerName, toUid, socket);
+        if (!joinResult.success) {
+            notifyHost({ type: 'INVITE_DECLINED', toName: playerName, reason: joinResult.error });
+            return { success: false, error: joinResult.error };
+        }
+        return { success: true, roomId: invite.roomId, playerId: joinResult.playerId };
+    }
+
+    kickFromCustomRoom(roomId: string, targetUid: string, requestingUid: string): { success: boolean; error?: string } {
+        const room = this.pendingCustomRooms.get(roomId);
+        if (!room || room.started) return { success: false, error: 'Room tidak valid' };
+        if (room.hostUid !== requestingUid) return { success: false, error: 'Hanya host yang bisa mengeluarkan pemain' };
+        const idx = room.players.findIndex(p => p.userUid === targetUid);
+        if (idx === -1) return { success: false, error: 'Pemain tidak ditemukan di room' };
+        const kickedPlayer = room.players[idx];
+        // Beritahu pemain yang di-kick sebelum dihapus
+        if (kickedPlayer.socket.readyState === 1) {
+            try { kickedPlayer.socket.send(JSON.stringify({ type: 'KICKED_FROM_ROOM', roomId })); } catch(_) {}
+        }
+        room.players.splice(idx, 1);
+        this.broadcastPendingCustomRoomUpdate(roomId);
+        console.log(`👢 ${kickedPlayer.name} dikeluarkan dari room ${roomId} oleh host`);
+        return { success: true };
+    }
+
+    leavePendingCustomRoom(roomId: string, userUid: string, isSpectatorRole: boolean) {
+        const room = this.pendingCustomRooms.get(roomId);
+        if (!room || room.started) return;
+
+        const isHost = userUid === room.hostUid;
+
+        if (isSpectatorRole) {
+            room.spectatorSocket = undefined;
+        } else {
+            const idx = room.players.findIndex(p => p.userUid === userUid);
+            if (idx !== -1) room.players.splice(idx, 1);
+        }
+
+        // Jika host keluar → bubarkan room, beri tahu semua pemain yang tersisa
+        if (isHost) {
+            const disbandMsg = JSON.stringify({ type: 'ROOM_DISBANDED' });
+            room.players.forEach(p => { if (p.socket.readyState === 1) { try { p.socket.send(disbandMsg); } catch(_) {} } });
+            if (room.spectatorSocket?.readyState === 1) { try { room.spectatorSocket.send(disbandMsg); } catch(_) {} }
+            this.pendingCustomRooms.delete(roomId);
+            console.log(`🗑️ Custom room dibubarkan oleh host: ${roomId}`);
+            return;
+        }
+
+        // Hapus room jika tidak ada sisa pemain hidup
+        const hasLivePlayer = room.players.some(p => p.socket.readyState === 1);
+        const hasLiveSpectator = room.spectatorSocket != null && room.spectatorSocket.readyState === 1;
+        if (!hasLivePlayer && !hasLiveSpectator) {
+            this.pendingCustomRooms.delete(roomId);
+            console.log(`🗑️ Pending custom room dihapus: ${roomId}`);
+        } else {
+            this.broadcastPendingCustomRoomUpdate(roomId);
+        }
+    }
+}
+
+const matchmaking = new MatchmakingQueue();
+setInterval(() => matchmaking.cleanupFinishedRooms(), 60000);
+
+// Track timer auto-mode yang pending per playerId agar bisa dibatalkan saat rejoin
+const pendingAutoModeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+console.log(`🎮 Card Game Nusantara Server v2`);
+console.log(`📦 Total kartu: ${ALL_CARDS.length} (${ALL_PROVINCES.length} provinsi × 10) | Per match: 16 provinsi × 10 = 160 kartu`);
+
+Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
+    const url = new URL(req.url);
+
+    if (url.pathname === "/stats") return Response.json(matchmaking.getStats());
+    if (url.pathname === "/health") return new Response("OK", { status: 200 });
+
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+        try {
+            const html = await Deno.readFile("index.html");
+            return new Response(html, {
+                headers: { "Content-Type": "text/html; charset=utf-8" }
+            });
+        } catch {
+            return new Response("index.html not found", { status: 404 });
+        }
+    }
+
+    if (url.pathname === "/leaderboard") {
+        const token = await fbGetToken();
+        if (!token) return Response.json({ error: "Firebase not configured" }, { status: 503 });
+        const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
+        const res = await fetch(
+            `${FB_DB_URL}/leaderboard.json`,
+            { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!res.ok) return Response.json({ error: "Failed to fetch leaderboard" }, { status: 502 });
+        // deno-lint-ignore no-explicit-any
+        const raw: Record<string, any> | null = await res.json();
+        if (!raw) return Response.json([]);
+        const entries = Object.entries(raw).map(([uid, d]) => ({
+            uid, name: d.name, rankName: d.rankName, points: d.points,
+            peakRank: d.peakRank, updatedAt: d.updatedAt
+        }));
+        // Sort: rank index desc, lalu points desc
+        entries.sort((a, b) => {
+            const ai = RANKS.indexOf(a.rankName ?? "Bronze III");
+            const bi = RANKS.indexOf(b.rankName ?? "Bronze III");
+            if (bi !== ai) return bi - ai;
+            return (b.points ?? 0) - (a.points ?? 0);
+        });
+        return Response.json(entries.slice(0, limit), {
+            headers: { "Access-Control-Allow-Origin": "*" }
+        });
+    }
+
+    if (req.headers.get("upgrade") === "websocket") {
+        const { socket, response } = Deno.upgradeWebSocket(req);
+        let currentPlayer: Player | null = null;
+        let lastPong = Date.now();
+        let pingInterval: ReturnType<typeof setInterval> | undefined;
+        // Custom room tracking per socket
+        let currentCustomRoomId: string | null = null;
+        let isCustomRoomSpectator = false;
+        // Party lobby tracking per socket (Main Online)
+        let currentPartyId: string | null = null;
+
+        socket.onopen = () => {
+            console.log("🔌 New connection");
+            lastPong = Date.now();
+            pingInterval = setInterval(() => {
+                if (socket.readyState !== 1) { clearInterval(pingInterval); return; }
+                // Tidak ada PONG lebih dari 45 detik → koneksi mati, tutup paksa
+                if (Date.now() - lastPong > 45000) {
+                    console.log(`⏰ Ping timeout: ${currentPlayer?.name || 'unknown'}`);
+                    clearInterval(pingInterval);
+                    try { socket.close(); } catch(_) {}
+                    return;
+                }
+                try { socket.send(JSON.stringify({ type: 'PING' })); } catch(_) { clearInterval(pingInterval); }
+            }, 20000); // kirim PING setiap 20 detik
+        };
+
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+
+                switch (data.type) {
+                    case 'JOIN_MATCHMAKING':
+                        currentPlayer = {
+                            id: `player_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+                            name: sanitizeName(data.playerName) || `Player_${Math.floor(Math.random()*9999)}`,
+                            socket, joinTime: Date.now(),
+                            userUid: data.userUid || '',
+                            partyId: data.partyId || undefined,
+                            partySize: data.partySize ? Math.min(Math.max(parseInt(data.partySize, 10), 2), 3) : undefined
+                        };
+                        // Tidak lagi idle — hapus dari online registry
+                        if (data.userUid) matchmaking.unregisterOnline(data.userUid);
+                        currentPartyId = null; // sudah masuk queue, bukan lobby lagi
+                        matchmaking.addPlayer(currentPlayer);
+                        break;
+
+                    case 'LEAVE_QUEUE':
+                        if (currentPlayer) matchmaking.removePlayer(currentPlayer.id);
+                        break;
+
+                    case 'PLAY_CARD':
+                    case 'DRAW_CARD':
+                    case 'FORCE_PICK_CARD':
+                        if (currentPlayer && data.roomId) {
+                            const room = matchmaking.getRoom(data.roomId);
+                            if (room) room.gameEngine.handlePlayerAction(currentPlayer.id, data);
+                        }
+                        break;
+
+                    case 'SET_AUTO_MODE':
+                        if (currentPlayer && data.roomId) {
+                            const room = matchmaking.getRoom(data.roomId);
+                            if (room) {
+                                room.gameEngine.setPlayerAutoMode(currentPlayer.id, data.enabled);
+                            }
+                        }
+                        break;
+
+                    case 'PLAYER_ACTIVE':
+                        // Player kembali aktif, matikan auto mode
+                        if (currentPlayer && data.roomId) {
+                            const room = matchmaking.getRoom(data.roomId);
+                            if (room) {
+                                room.gameEngine.setPlayerAutoMode(currentPlayer.id, false);
+                                const state = room.gameEngine.getFullState();
+                                try { socket.send(JSON.stringify({ type: 'GAME_STATE_UPDATE', state })); } catch(e) {}
+                            }
+                        }
+                        break;
+
+                    case 'SURRENDER':
+                        if (isCustomRoomSpectator) {
+                            try { socket.send(JSON.stringify({ type: 'ERROR', message: 'Spectator tidak dapat menyerah.' })); } catch(_) {}
+                        } else if (currentPlayer && data.roomId) {
+                            const room = matchmaking.getRoom(data.roomId);
+                            if (room) room.gameEngine.handleSurrender(currentPlayer.id);
+                        }
+                        break;
+
+                    case 'LEAVE_MATCH':
+                        // Player secara eksplisit memilih "Kembali ke Home"
+                        if (currentPlayer && data.roomId) {
+                            const room = matchmaking.getRoom(data.roomId);
+                            if (room && room.status === 'playing') {
+                                const allLeft = room.gameEngine.markPlayerLeft(currentPlayer.id);
+                                if (allLeft) {
+                                    room.status = 'finished';
+                                    room.finishedAt = Date.now();
+                                    console.log(`🏁 Room ${data.roomId} selesai - semua pemain manusia telah pergi`);
+                                }
+                            }
+                        }
+                        break;
+
+                    case 'FIND_MY_ROOM':
+                        // Cari room aktif berdasarkan userUid — untuk login di device berbeda
+                        if (data.userUid) {
+                            const found = matchmaking.findRoomByUserUid(data.userUid);
+                            if (found) {
+                                try { socket.send(JSON.stringify({ type: 'ROOM_FOUND', ...found })); } catch(_) {}
+                            } else {
+                                try { socket.send(JSON.stringify({ type: 'ROOM_NOT_FOUND' })); } catch(_) {}
+                            }
+                        }
+                        break;
+
+                    case 'PONG':
+                        lastPong = Date.now(); // catat waktu PONG terakhir untuk deteksi koneksi mati
+                        break;
+
+                    case 'REJOIN_ROOM':
+                        if (data.roomId && data.playerId) {
+                            // Batalkan timer auto-mode yang mungkin masih pending dari disconnect sebelumnya
+                            const pendingTimer = pendingAutoModeTimers.get(data.playerId);
+                            if (pendingTimer) {
+                                clearTimeout(pendingTimer);
+                                pendingAutoModeTimers.delete(data.playerId);
+                            }
+                            const success = matchmaking.rejoinRoom(
+                                data.roomId, data.playerId, data.playerName || 'Player',
+                                data.userUid || '',
+                                socket
+                            );
+                            if (success) {
+                                currentPlayer = { id: data.playerId, name: data.playerName || 'Player', socket, joinTime: Date.now(), userUid: data.userUid || '' };
+                                const room = matchmaking.getRoom(data.roomId);
+                                if (room) {
+                                    room.gameEngine.setPlayerAutoMode(data.playerId, false);
+                                    if (room.status === 'playing') {
+                                        // Kirim GAME_STARTED agar client tahu harus masuk ke layar game,
+                                        // bukan GAME_STATE_UPDATE yang mungkin diabaikan client di layar provinsi
+                                        try { socket.send(JSON.stringify({
+                                            type: 'GAME_STARTED',
+                                            roomId: data.roomId,
+                                            playerId: data.playerId,
+                                            state: room.gameEngine.getFullState(),
+                                            isCustomRoom: room.gameEngine.isCustomRoom
+                                        })); } catch(_) {}
+                                    } else {
+                                        // Status 'starting' — kirim ulang info provinsi + sisa waktu countdown
+                                        const remainingMs = Math.max(0, 6000 - (Date.now() - room.createdAt));
+                                        try { socket.send(JSON.stringify({
+                                            type: 'PROVINCES_SELECTED',
+                                            provinces: room.gameEngine.selectedProvinces,
+                                            mandatory: 'Bangka Belitung',
+                                            remainingMs,
+                                            roomId: data.roomId,
+                                            playerId: data.playerId
+                                        })); } catch(_) {}
+                                        try { socket.send(JSON.stringify({ type: 'GAME_STATE_UPDATE', state: room.gameEngine.getFullState() })); } catch(_) {}
+                                    }
+                                    console.log(`🔄 ${data.playerId} rejoined ${data.roomId} (status: ${room.status})`);
+                                }
+                            } else {
+                                // Cek apakah room sudah finished — kirim ulang GAME_OVER agar client bisa simpan stats
+                                const finishedRoom = matchmaking.getRoom(data.roomId);
+                                if (finishedRoom && finishedRoom.status === 'finished') {
+                                    const gp = finishedRoom.gameEngine.getPlayerById(data.playerId);
+                                    const uidOk = gp && (!gp.userUid || gp.userUid === (data.userUid || ''));
+                                    if (uidOk) {
+                                        try { socket.send(JSON.stringify({
+                                            type: 'GAME_OVER',
+                                            players: finishedRoom.gameEngine.gs.players.map(p => ({
+                                                id: p.id, name: p.name, rank: p.rank, hand: p.hand, isBot: p.isBot
+                                            }))
+                                        })); } catch(_) {}
+                                        // Kirim SAVE_STATS_CLIENT agar client menyimpan stats sebagai fallback
+                                        // (server sudah mencoba simpan saat game selesai, tapi socket lama mungkin sudah putus)
+                                        if (gp && gp.rank > 0) {
+                                            try {
+                                                socket.send(JSON.stringify({ type: 'SAVE_STATS_CLIENT', rank: gp.rank }));
+                                            } catch (_) {}
+                                        }
+                                        console.log(`📤 GAME_OVER dikirim ulang ke ${data.playerId} (late rejoin - room sudah finished)`);
+                                    } else {
+                                        try { socket.send(JSON.stringify({ type: 'ERROR', message: 'Akun tidak cocok.' })); } catch(_) {}
+                                    }
+                                } else {
+                                    try { socket.send(JSON.stringify({ type: 'ERROR', message: 'Room tidak ditemukan atau sudah berakhir.' })); } catch(_) {}
+                                }
+                            }
+                        }
+                        break;
+
+                    case 'REJOIN_AS_SPECTATOR':
+                        if (data.roomId && data.userUid) {
+                            const success = matchmaking.rejoinAsSpectator(data.roomId, data.userUid, socket);
+                            if (success) {
+                                isCustomRoomSpectator = true;
+                                currentCustomRoomId = data.roomId;
+                                const room = matchmaking.getRoom(data.roomId);
+                                if (room) {
+                                    try { socket.send(JSON.stringify({
+                                        type: 'GAME_STARTED',
+                                        roomId: data.roomId,
+                                        playerId: null,
+                                        state: room.gameEngine.getFullState(),
+                                        isCustomRoom: true,
+                                        isSpectator: true
+                                    })); } catch(_) {}
+                                    console.log(`👁️ Spectator ${data.userUid} rejoined ${data.roomId}`);
+                                }
+                            } else {
+                                try { socket.send(JSON.stringify({ type: 'ERROR', message: 'Room tidak ditemukan atau sesi penonton tidak valid.' })); } catch(_) {}
+                            }
+                        }
+                        break;
+
+                    case 'CREATE_CUSTOM_ROOM':
+                        if (currentCustomRoomId || (data.userUid && matchmaking.findRoomByUserUid(data.userUid))) {
+                            socket.send(JSON.stringify({ type: 'ERROR', message: 'Sudah berada di room lain. Keluar dulu.' }));
+                        } else if (data.playerName && data.userUid && (data.role === 'pemain' || data.role === 'penonton')) {
+                            const sanitizedName = sanitizeName(data.playerName) || 'Player';
+                            const crResult = matchmaking.createPendingCustomRoom(sanitizedName, data.userUid, data.role, socket);
+                            currentCustomRoomId = crResult.roomId;
+                            isCustomRoomSpectator = data.role === 'penonton';
+                            if (data.role === 'pemain' && crResult.hostPlayerId) {
+                                currentPlayer = { id: crResult.hostPlayerId, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
+                            }
+                            socket.send(JSON.stringify({ type: 'CUSTOM_ROOM_CREATED', roomId: crResult.roomId }));
+                        }
+                        break;
+
+                    case 'JOIN_CUSTOM_ROOM':
+                        // Jika currentCustomRoomId masih set tapi player sudah di-kick (tidak ada di room.players),
+                        // otomatis bersihkan state agar join bisa dilanjutkan (race condition kick → reinvite)
+                        if (currentCustomRoomId) {
+                            const _prevRoom = matchmaking.getPendingCustomRoom(currentCustomRoomId);
+                            const _uid = currentPlayer?.userUid || data.userUid;
+                            if (!_prevRoom || (!_prevRoom.players.some(p => p.userUid === _uid) && _prevRoom.spectatorUid !== _uid)) {
+                                currentCustomRoomId = null;
+                                isCustomRoomSpectator = false;
+                            }
+                        }
+                        if (currentCustomRoomId || (data.userUid && matchmaking.findRoomByUserUid(data.userUid))) {
+                            socket.send(JSON.stringify({ type: 'ERROR', message: 'Sudah berada di room lain. Keluar dulu.' }));
+                        } else if (data.roomId && data.playerName && data.userUid) {
+                            const sanitizedName = sanitizeName(data.playerName) || 'Player';
+                            const joinResult = matchmaking.joinPendingCustomRoom(data.roomId, sanitizedName, data.userUid, socket);
+                            if (joinResult.success) {
+                                currentPlayer = { id: joinResult.playerId!, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
+                                currentCustomRoomId = data.roomId;
+                                matchmaking.broadcastPendingCustomRoomUpdate(data.roomId);
+                            } else {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: joinResult.error || 'Gagal bergabung' }));
+                            }
+                        } else {
+                            socket.send(JSON.stringify({ type: 'ERROR', message: 'Data tidak lengkap untuk bergabung ke room.' }));
+                        }
+                        break;
+
+                    case 'START_CUSTOM_ROOM':
+                        if (currentCustomRoomId) {
+                            const crPending = matchmaking.getPendingCustomRoom(currentCustomRoomId);
+                            if (!crPending) {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: 'Room tidak ditemukan.' }));
+                            } else if (crPending.hostUid !== (currentPlayer?.userUid || data.userUid)) {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: 'Hanya host yang bisa memulai pertandingan.' }));
+                            } else {
+                                matchmaking.startCustomRoomGame(currentCustomRoomId).then(started => {
+                                    if (!started) socket.send(JSON.stringify({ type: 'ERROR', message: 'Gagal memulai. Minimal 2 pemain.' }));
+                                }).catch(err => {
+                                    console.error('❌ startCustomRoomGame error:', err);
+                                    socket.send(JSON.stringify({ type: 'ERROR', message: 'Gagal memulai custom room.' }));
+                                });
+                            }
+                        }
+                        break;
+
+                    case 'LEAVE_CUSTOM_ROOM':
+                        if (currentCustomRoomId) {
+                            matchmaking.leavePendingCustomRoom(currentCustomRoomId, currentPlayer?.userUid || data.userUid || '', isCustomRoomSpectator);
+                            currentCustomRoomId = null;
+                            isCustomRoomSpectator = false;
+                        }
+                        break;
+
+                    case 'KICK_FROM_ROOM':
+                        if (currentCustomRoomId && currentPlayer?.userUid && data.targetUid) {
+                            const kickRes = matchmaking.kickFromCustomRoom(currentCustomRoomId, data.targetUid, currentPlayer.userUid);
+                            if (!kickRes.success) {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: kickRes.error }));
+                            }
+                        }
+                        break;
+
+                    // ── Party lobby (Main Online ranked) ────────────────────────────
+                    case 'CREATE_PARTY':
+                        // Pemain buat party di layar Main Online
+                        if (data.userUid && data.playerName && !currentPartyId) {
+                            const sanitizedName = sanitizeName(data.playerName) || 'Player';
+                            if (!currentPlayer) {
+                                currentPlayer = { id: data.userUid, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
+                            }
+                            matchmaking.unregisterOnline(data.userUid);
+                            currentPartyId = matchmaking.createPartyLobby(data.userUid, sanitizedName, socket);
+                            socket.send(JSON.stringify({ type: 'PARTY_CREATED', partyId: currentPartyId }));
+                            matchmaking.broadcastPartyUpdate(currentPartyId);
+                        }
+                        break;
+
+                    case 'INVITE_TO_PARTY':
+                        // Leader undang teman online ke party
+                        if (currentPartyId && currentPlayer?.userUid && data.targetUid) {
+                            const pInvRes = matchmaking.inviteToParty(currentPartyId, currentPlayer.userUid, data.targetUid);
+                            if (pInvRes.success) {
+                                socket.send(JSON.stringify({ type: 'PARTY_INVITE_SENT', targetUid: data.targetUid }));
+                            } else {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: pInvRes.error }));
+                            }
+                        }
+                        break;
+
+                    case 'PARTY_INVITE_RESPONSE':
+                        // Target terima / tolak undangan party
+                        if (data.inviteId && data.userUid) {
+                            const pName = currentPlayer?.name || sanitizeName(data.playerName) || 'Player';
+                            const pRespRes = matchmaking.respondToPartyInvite(data.inviteId, data.userUid, !!data.accepted, socket, pName);
+                            if (data.accepted && pRespRes.success) {
+                                currentPartyId = pRespRes.partyId!;
+                                if (!currentPlayer) {
+                                    currentPlayer = { id: data.userUid, name: pName, socket, joinTime: Date.now(), userUid: data.userUid };
+                                }
+                                matchmaking.unregisterOnline(data.userUid);
+                                matchmaking.broadcastPartyUpdate(pRespRes.partyId!);
+                                socket.send(JSON.stringify({ type: 'PARTY_JOINED', partyId: pRespRes.partyId }));
+                            } else if (!data.accepted) {
+                                // Penolakan sudah diteruskan ke leader di respondToPartyInvite
+                            } else {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: pRespRes.error }));
+                            }
+                        }
+                        break;
+
+                    case 'START_PARTY_QUEUE':
+                        // Leader mulai antrian — server kirim PARTY_QUEUING ke semua anggota,
+                        // lalu masing-masing client kirim JOIN_MATCHMAKING dengan sharedPartyId
+                        if (currentPartyId && currentPlayer?.userUid) {
+                            const sqRes = matchmaking.startPartyQueue(currentPartyId, currentPlayer.userUid);
+                            if (!sqRes.success) {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: sqRes.error }));
+                            }
+                            // currentPartyId di-clear setelah PARTY_QUEUING diterima client
+                            // dan client kirim JOIN_MATCHMAKING (handler di atas yang set null)
+                            currentPartyId = null;
+                        }
+                        break;
+
+                    case 'LEAVE_PARTY':
+                        if (currentPartyId && currentPlayer?.userUid) {
+                            matchmaking.leavePartyLobby(currentPartyId, currentPlayer.userUid);
+                            currentPartyId = null;
+                            // Kembali ke registry agar bisa diundang lagi
+                            if (currentPlayer.userUid && currentPlayer.name) {
+                                matchmaking.registerOnline(currentPlayer.userUid, currentPlayer.name, socket);
+                            }
+                        }
+                        break;
+
+                    // ── Online registry ──────────────────────────────────────────────
+                    case 'REGISTER_ONLINE':
+                        // Client kirim ini saat ada di home screen (idle)
+                        if (data.userUid && data.playerName) {
+                            const sanitizedName = sanitizeName(data.playerName) || 'Player';
+                            matchmaking.registerOnline(data.userUid, sanitizedName, socket);
+                            if (!currentPlayer) {
+                                // Simpan identitas dasar agar onclose bisa cleanup
+                                currentPlayer = { id: data.userUid, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
+                            }
+                        }
+                        break;
+
+                    case 'GET_ONLINE_PLAYERS':
+                        // Kembalikan daftar pemain yang sedang idle (bisa diundang)
+                        if (data.userUid) {
+                            const onlineList = matchmaking.getOnlinePlayers(data.userUid);
+                            socket.send(JSON.stringify({ type: 'ONLINE_PLAYERS', players: onlineList }));
+                        }
+                        break;
+
+                    // ── Bot slot management ─────────────────────────────────────────
+                    case 'ADD_BOT_SLOT': {
+                        // Spectator-host tidak punya currentPlayer, ambil uid dari room.hostUid
+                        const crRoom = currentCustomRoomId ? matchmaking.getPendingCustomRoom(currentCustomRoomId) : null;
+                        const requestingUid = currentPlayer?.userUid ?? crRoom?.hostUid;
+                        if (currentCustomRoomId && requestingUid) {
+                            const level = Math.min(Math.max(parseInt(data.level, 10) || 1, 1), 3);
+                            const slotPosition = Math.min(Math.max(parseInt(data.slotPosition, 10) || 2, 1), 4);
+                            const addRes = matchmaking.addBotSlotToCustomRoom(currentCustomRoomId, level, requestingUid, slotPosition);
+                            if (addRes.success) {
+                                matchmaking.broadcastPendingCustomRoomUpdate(currentCustomRoomId);
+                            } else {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: addRes.error }));
+                            }
+                        }
+                        break;
+                    }
+
+                    case 'REMOVE_BOT_SLOT': {
+                        const crRoom2 = currentCustomRoomId ? matchmaking.getPendingCustomRoom(currentCustomRoomId) : null;
+                        const requestingUid2 = currentPlayer?.userUid ?? crRoom2?.hostUid;
+                        if (currentCustomRoomId && requestingUid2) {
+                            const slotPosition = Math.min(Math.max(parseInt(data.slotPosition, 10) || 2, 1), 4);
+                            const remRes = matchmaking.removeBotSlotFromCustomRoom(currentCustomRoomId, slotPosition, requestingUid2);
+                            if (remRes.success) {
+                                matchmaking.broadcastPendingCustomRoomUpdate(currentCustomRoomId);
+                            } else {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: remRes.error }));
+                            }
+                        }
+                        break;
+                    }
+
+                    // ── Invite system ────────────────────────────────────────────────
+                    case 'INVITE_TO_ROOM':
+                        // Host mengundang pemain online ke custom room
+                        if (currentCustomRoomId && currentPlayer?.userUid && data.targetUid) {
+                            const invRes = matchmaking.invitePlayerToCustomRoom(currentCustomRoomId, currentPlayer.userUid, data.targetUid);
+                            if (invRes.success) {
+                                socket.send(JSON.stringify({ type: 'INVITE_SENT', targetUid: data.targetUid }));
+                            } else {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: invRes.error }));
+                            }
+                        }
+                        break;
+
+                    case 'INVITE_RESPONSE':
+                        // Target menjawab undangan: accepted=true/false
+                        if (data.inviteId && data.userUid) {
+                            const pName = currentPlayer?.name || sanitizeName(data.playerName) || 'Player';
+                            const respRes = matchmaking.respondToInvite(data.inviteId, data.userUid, !!data.accepted, socket, pName);
+                            if (data.accepted && respRes.success) {
+                                // Daftarkan sebagai currentPlayer & masuk room
+                                currentPlayer = { id: respRes.playerId!, name: pName, socket, joinTime: Date.now(), userUid: data.userUid };
+                                currentCustomRoomId = respRes.roomId!;
+                                // Hapus dari registry — tidak lagi idle
+                                matchmaking.unregisterOnline(data.userUid);
+                                matchmaking.broadcastPendingCustomRoomUpdate(respRes.roomId!);
+                                socket.send(JSON.stringify({ type: 'INVITE_ACCEPTED', roomId: respRes.roomId, playerId: respRes.playerId }));
+                            } else if (!data.accepted) {
+                                // Penolakan sudah dinotifikasi ke host di respondToInvite
+                            } else {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: respRes.error }));
+                            }
+                        }
+                        break;
+
+                    case 'CLIENT_PING':
+                        try { socket.send(JSON.stringify({ type: 'SERVER_PONG', ts: data.ts })); } catch(e) {}
+                        break;
+
+                    case 'REPORT_PING':
+                        if (currentPlayer && data.roomId) {
+                            const room = matchmaking.getRoom(data.roomId);
+                            if (room) {
+                                const rp = room.players.find(p => p.id === currentPlayer!.id);
+                                if (rp) (rp as any).ping = typeof data.ping === 'number' ? data.ping : null;
+                                const pings = room.players.map(p => ({
+                                    id: p.id,
+                                    name: p.name,
+                                    ping: (p as any).ping ?? null
+                                }));
+                                room.gameEngine.broadcastToAll({ type: 'PING_DATA', pings });
+                            }
+                        }
+                        break;
+
+                    default:
+                        console.log(`❓ Unknown: ${data.type}`);
+                }
+            } catch (error) {
+                console.error("❌ Error:", error);
+            }
+        };
+
+        socket.onclose = () => {
+            clearInterval(pingInterval);
+            console.log(`🔌 Disconnected: ${currentPlayer?.name || 'unknown'}`);
+
+            if (currentCustomRoomId) {
+                const pendingRoom = matchmaking.getPendingCustomRoom(currentCustomRoomId);
+                const activeRoom = matchmaking.getRoom(currentCustomRoomId);
+
+                if (pendingRoom && !pendingRoom.started) {
+                    // Masih di lobby, belum mulai game — keluarkan dari pending room
+                    matchmaking.leavePendingCustomRoom(currentCustomRoomId, currentPlayer?.userUid || '', isCustomRoomSpectator);
+                } else if (activeRoom?.gameEngine) {
+                    // Game sudah berjalan
+                    if (isCustomRoomSpectator) {
+                        // Spectator disconnect: cukup hapus dari gameEngine
+                        activeRoom.gameEngine.removeSpectator(socket);
+                    }
+                    // Untuk pemain biasa di custom room, auto-mode timer di bawah menangani disconnect
+                }
+            }
+
+            // Cleanup party lobby jika masih di dalamnya
+            if (currentPartyId && currentPlayer?.userUid) {
+                matchmaking.leavePartyLobby(currentPartyId, currentPlayer.userUid);
+                currentPartyId = null;
+            }
+
+            if (currentPlayer) {
+                // Hapus dari online registry (idle) jika terdaftar
+                if (currentPlayer.userUid) matchmaking.unregisterOnline(currentPlayer.userUid);
+                matchmaking.removePlayer(currentPlayer.id);
+                // Tunda auto-mode 5 detik agar player punya waktu reconnect.
+                // Timer disimpan di Map agar bisa dibatalkan jika player berhasil rejoin sebelum 5 detik.
+                const capturedId = currentPlayer.id;
+                const autoTimer = setTimeout(() => {
+                    pendingAutoModeTimers.delete(capturedId);
+                    matchmaking.setPlayerAutoModeInAllRooms(capturedId, true);
+                }, 5000);
+                pendingAutoModeTimers.set(capturedId, autoTimer);
+            }
+        };
+
+        socket.onerror = (e) => { clearInterval(pingInterval); console.error("❌ WS Error:", e); };
+
+        return response;
+    }
+
+    return new Response(
+        `🎮 Card Game Nusantara Server v2\nStats: /stats\nHealth: /health\nTotal Kartu: ${ALL_CARDS.length}`,
+        { status: 200, headers: { "Content-Type": "text/plain" } }
+    );
+});
