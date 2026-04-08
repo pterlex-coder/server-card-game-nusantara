@@ -511,7 +511,7 @@ function sanitizeName(name: unknown): string {
 // =============================================
 // DRAW CARD LEVEL SYSTEM
 // Level 1 (awal) → Level 10 (tertinggi)
-// Naik level setiap 2 draw (total 18 draw untuk mencapai Level 10)
+// Naik level setiap 2 draw (total 18 draw untuk mencapai Level 10, Lv10 tercapai di draw ke-18)
 // Prioritas: rarity dengan skor tertinggi di-draw lebih dulu (greedy)
 // =============================================
 const DRAW_RATES: Record<number, Record<string, number>> = {
@@ -561,9 +561,9 @@ const LEVEL_NAMES: Record<number, string> = {
     1: 'Lv1', 2: 'Lv2', 3: 'Lv3', 4: 'Lv4', 5: 'Lv5',
     6: 'Lv6', 7: 'Lv7', 8: 'Lv8', 9: 'Lv9', 10: 'Lv10'
 };
-// Threshold: naik level setiap 3 draw (Lv1→Lv2=3, Lv2→Lv3=6, ..., Lv9→Lv10=27)
+// Threshold: naik level setiap 1 draw (Lv1→Lv2=1, Lv2→Lv3=2, ..., Lv9→Lv10=9)
 function calcDrawLevel(drawCount: number): number {
-    return Math.min(Math.floor(drawCount / 3) + 1, 10);
+    return Math.min(drawCount + 1, 10);
 }
 
 // =============================================
@@ -835,24 +835,24 @@ async function pickWeightedProvinces(): Promise<string[]> {
         // Sort ascending berdasarkan count (paling jarang → paling awal)
         const sorted = [...candidates].sort((a, b) => (counts[a.name] ?? 0) - (counts[b.name] ?? 0));
 
-        // Ambil 15 terkecil; jika ada seri di posisi batas, random di antara yang seri
-        const cutoff = counts[sorted[14].name] ?? 0;
+        // Ambil 7 terkecil; jika ada seri di posisi batas, random di antara yang seri
+        const cutoff = counts[sorted[6].name] ?? 0;
         const definiteIn = sorted.filter(p => (counts[p.name] ?? 0) < cutoff).map(p => p.name);
         const tied = sorted.filter(p => (counts[p.name] ?? 0) === cutoff).map(p => p.name);
-        const need = 15 - definiteIn.length;
+        const need = 7 - definiteIn.length;
         const fromTied = [...tied].sort(() => Math.random() - 0.5).slice(0, need);
         selected = [...definiteIn, ...fromTied];
 
-        // Increment counts hanya untuk 14 provinsi random
+        // Increment counts hanya untuk 7 provinsi random
         // (Bangka Belitung tidak dilacak — selalu wajib hadir, countnya tidak informatif)
         for (const name of selected) counts[name] = (counts[name] ?? 0) + 1;
         return counts;
     });
 
-    if (!ok || selected.length < 15) {
+    if (!ok || selected.length < 7) {
         // Fallback: pure random jika transaksi gagal (misal Firebase tidak tersedia)
         console.warn('⚠️ pickWeightedProvinces fallback ke random murni');
-        return [...candidates].sort(() => Math.random() - 0.5).slice(0, 15).map(p => p.name);
+        return [...candidates].sort(() => Math.random() - 0.5).slice(0, 7).map(p => p.name);
     }
     return selected;
 }
@@ -916,7 +916,7 @@ class GameEngine {
         this.addPlayer({ id: `bot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, name, isBot: true, userUid: 'BOT', botLevel: level });
     }
 
-    static BOT_NAMES = ['Miya','Nayla','Aldi','Marcel','Zoe','Kara','Mega','Genta','Flex','Angel','Teorita','Miko','Luba','Nana','Kong','Walka'];
+    static BOT_NAMES = ['Miya','Nayla','Aldi','Marcel','Zoe','Kara','Mega','Genta','Flex','Angel','Teorita','Miko','Luba','Nana','Kong','Walka','Ace','Aero','Astro','Axel','Blaze','Bolt','Blade','Cyra','Dash','Draco','Echo','Enzo','Falcon','Flash','Frost','Ghost','Helix','Hunter','Ion','Jett','Kai','Kenzo','Kyra','Leo','Lynx','Max','Neo','Nova','Onyx','Orion','Phoenix','Pyro','Quest','Raptor','Raven','Rex','Rogue','Shadow','Sky','Sonic','Spark','Storm','Titan','Turbo','Vector','Viper','Volt','Wolf','Xander','Zero','8Bit','Alpha','Arcade','Armor','Avatar','Beta','Bot','Buff','Byte','Champ','Click','Combo','Cyber','Data','Dino','Drift','Epic','Giga','Glitch','Hero','Joy','King','Laser','Level','Link','Loot','Macro','Matrix','Meta','Mod','Nexus','Nitro','NoobMaster','Omega','Pixel','Player1','Prime','Pro','Pulse','Radar','Rank','Reboot','Retro','Rover','Scope','Shield','Sniper','Spawn','Tank','Tech','Saka','Rimba','Guntur','Kilat','Bayu','Tirta','Satria','Arga','Bumi','Langit','Mentari','Surya','Bintang','Jagat','Nusa','Wira','Gana','Kala','Sena','Jati','Raka','Abim','Bagas','Dimas','Elang','Fajar','Galang','Hasta','Irawan','Jaka','Kresna','Laksana','Mahesa','Nakula','Panji','Rama','Sakti','Taka','Udara','Wisnu','Yudha','Agni','Banyu','Candra','Dirga','Eka','Gani','Indra','Kavi','Lingga','Manggala','Nanda','Pandu','Radit','Sapta','Tegar','Utama','Vano','Wawan','Yuda','Adhi','Bimo','Catur','Danu','Erlangga','Gilang','Heru','Kusuma','Lutfi','Mahendra','Okta','Putra','Restu','Soni','Tio','Vito','Wildan','Ardi','Bastian','Ciko','Desta','Evan','Fero','Geri','Hugo','Ivan','Jojo','Kiki','Leon','Niko','Owen','Reno','Sastra','Tedi','Vian','Willy','Yogi','Amara','Bening','Citra','Dara','Elok','Gita','Hana','Indah','Jelita','Kartika','Lestari','Melati','Nila','Puspita','Ratna','Sari','Tiara','Utari','Vina','Wulan','Zara','Anis','Bunga','Caca','Desi','Fani','Ghea','Hesti','Irma','Jihan','Kania','Laras','Maya','Ola','Putri','Rani','Siska','Tika','Ulfa','Vera','Winda','Baby','Bambi','Berry','Biscuit','Boba','Bonbon','Bubbles','Bunny','Candy','Choco','Chubby','Cookie','Cotton','Cupcake','Daisy','Didi','Donut','Fluffy','Foxy','Gummy','Honey','Jelly','Lala','Lulu','Marshmallow','Mochi','Momo','Moo','Muffin','Nemo','Nougat','Nugget','Oreo','Panda','Peach','Peanut','Pippin','Pixie','Pocky','Pudding','Snowy','Sugar','Sunny','Taffy','Toto','Waffle','Yoyo','Amber','Aqua','Ash','Aurora','Autumn','Bamboo','Basil','Birch','Bloom','Breeze','Canyon','Cedar','Cliff','Cloud','Coral','Creek','Crystal','Dawn','Dew','Dusk','Earth','Ember','Fern','Flint','Forest','Galaxy','Glacier','Grove','Harbor','Hazel','Ice','Island','Ivy','Jade','Jasper','Jungle','Lake','Leaf','Lunar','Marina','Mist','Moss','Mountain','Ocean','Pearl','Rain','Ridge','River','Rock','Ruby','Admiral','Archer','Atlas','Baron','Beast','Brave','Captain','Chief','Commander','Duke','Elite','Fighter','Force','General','Giant','Glory','Grand','Guard','Hammer','Iron','Judge','Knight','Leader','Legend','Liberty','Major','Master','Maverick','Mighty','Noble','Patrol','Pilot','Prince','Ranger','Royal','Ruler','Sarge','Scout','Sentinel','Spartan','Spirit','Squire','Steel','Strong','Valor','Victor','Warden','Alien','Apollo','Asteroid','Atom','Comet','Cosmos','Electron','Flare','Gravity','Jupiter','Mars','Mercury','Meteor','Milky','Moon','Nebula','Neptune','Neutron','Orbit','Photon','Planet','Pluto','Proton','Pulsar','Quark','Rocket','Saturn','Solar','Space','Star','Supernova','Telescope','Universe','Venus','Zenith','Albedo','Binary','Borealis','Eclipse','Equinox','Gamma','Horizon','Light','Magnet','Nadir','Prism','Quasar','Ray','Static','Artist','Banjo','Bard','Beat','Blue','Canvas','Chord','Color','Craft','Doodle','Drum','Fiddle','Flute','Frame','Gloss','Guitar','Harp','Hue','Ink','Jazz','Lens','Lyric','Melody','Muse','Music','Note','Paint','Pastel','Piano','Poem','Pop','Quill','Reed','Rhythm','Rocker','Sax','Sketch','Solo','Song','Stage','Studio','Style','Tempo','Tone','Tune','Verse','Vibra','Viola','Vivid','Zinc','Abiz','Aki','Alen','Amex','Arlo','Ashy','Atre','Ayra','Babs','Bax','Beck','Bery','Bima','Bix','Bo','Boxy','Bree','Bro','Cael','Cal','Case','Caz','Ciro','Cleo','Coen','Cruz','Dax','Deon','Dex','Dion','Dix','Dora','Drax','Elex','Eli','Eon','Era','Evox','Ezra','Faby','Fan','Fay','Fiko','Finn','Fizo','Flux','Gaby','Gaze','Geo','Gery','Gio','Gox','Guy','Han','Hiro','Hux','Iker','Iko','Ira','Ivey','Izzy','Jace','Jax','Jiro','Jox','Juna','Kane','Ken','Keo','Kiro','Koda','Kojo','Kora','Kruz','Kylo','Lax','Lio','Lox','Luca','Lumi','Lux','Mace','Mako','Maxy','Mick','Milo','Moxy','Mylo','Nate','Nico','Nix','Noa','Nox','Nyx','Odin','Onix','Otto','Oz','Pax','Piko','Pix','Puck','Quip','Rael','Raf','Rayo','Raz','Ren','Riko','Rio','Rix','Roam','Roni','Roxy','Ryu','Savy','Saxo','Siko','Skyo','Sly','Spix','Tavi','Tex','Thor','Tiko','Tivo','Trax','Trix','Ty','Tyro','Ugo','Una','Uno','Uzzi','Van','Varo','Vex','Via','Vox','Xavi','Yuki','Zade','Zane','Zeke','Zizo'];
     static usedBotNames: string[] = [];
 
     static pickBotName(): string {
@@ -1129,7 +1129,7 @@ class GameEngine {
             }
         });
 
-        this.broadcastLog(`🎮 Game dimulai! 16 provinsi aktif. Setiap pemain mendapat 10 kartu (1 per rarity).`);
+        this.broadcastLog(`🎮 Game dimulai! 8 provinsi aktif. Setiap pemain mendapat 10 kartu (1 per rarity).`);
         setTimeout(() => this.startPhase1(), 500);
     }
 
@@ -2087,7 +2087,7 @@ class MatchmakingQueue {
         const roomId = `room_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
         const gameEngine = new GameEngine(roomId);
 
-        // Pilih 16 provinsi: Bangka Belitung SELALU hadir + 15 weighted (jarang muncul diprioritaskan)
+        // Pilih 8 provinsi: Bangka Belitung SELALU hadir + 7 weighted (jarang muncul diprioritaskan)
         const MANDATORY_PROVINCE = 'Bangka Belitung';
         const selectedProvinces = [MANDATORY_PROVINCE, ...await pickWeightedProvinces()];
         gameEngine.setSelectedProvinces(selectedProvinces);
@@ -2370,7 +2370,7 @@ class MatchmakingQueue {
 
             room.players.forEach(p => gameEngine.addPlayer({ id: p.id, name: p.name, isBot: false, socket: p.socket, userUid: p.userUid }));
             // Tambahkan bot sesuai slot yang sudah ditentukan host
-            Object.values(room.botSlots).forEach(b => gameEngine.addBot(GameEngine.pickBotName(), b.level));
+            Object.values(room.botSlots).forEach(b => gameEngine.addBot(`Bot Lv${b.level}`, b.level));
 
             const gameRoom: GameRoom = {
                 id: roomId,
@@ -2680,7 +2680,7 @@ setInterval(() => matchmaking.cleanupFinishedRooms(), 60000);
 const pendingAutoModeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 console.log(`🎮 Card Game Nusantara Server v2`);
-console.log(`📦 Total kartu: ${ALL_CARDS.length} (${ALL_PROVINCES.length} provinsi × 10) | Per match: 16 provinsi × 10 = 160 kartu`);
+console.log(`📦 Total kartu: ${ALL_CARDS.length} (${ALL_PROVINCES.length} provinsi × 10) | Per match: 8 provinsi × 10 = 80 kartu`);
 
 Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
     const url = new URL(req.url);
