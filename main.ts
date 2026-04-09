@@ -2018,8 +2018,12 @@ class MatchmakingQueue {
             partyPlayers.forEach(p => {
                 try { p.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Party ditemukan! Mencari lawan... (${allPlayers.length}/4)` })); } catch(e) {}
             });
-            setTimeout(() => {
-                // Cek lagi setelah timeout
+            // FIX: Simpan timeout ke partyGroupTimeouts dan kembalikan partyPlayers ke partyGroups
+            // agar removePlayer() bisa membatalkan timeout ini jika semua member disconnect/cancel.
+            this.partyGroups.set(partyId, partyPlayers);
+            const waitTimer = setTimeout(() => {
+                this.partyGroupTimeouts.delete(partyId);
+                this.partyGroups.delete(partyId);
                 const extraNeeded = this.MATCH_SIZE - allPlayers.length;
                 const extra: Player[] = [];
                 for (let i = 0; i < this.queue.length && extra.length < extraNeeded; i++) {
@@ -2031,12 +2035,19 @@ class MatchmakingQueue {
                     }
                 }
                 const finalPlayers = [...allPlayers, ...extra].filter(p => p.socket.readyState === 1);
+                // Batalkan jika tidak ada member party yang masih online
+                if (finalPlayers.filter(p => partyPlayers.some(pp => pp.id === p.id)).length === 0) {
+                    console.log(`\uD83D\uDEAB Party ${partyId} dibatalkan \u2014 semua member sudah disconnect`);
+                    extra.forEach(p => { this.queue.unshift(p); });
+                    return;
+                }
                 const finalBots = this.MATCH_SIZE - finalPlayers.length;
                 finalPlayers.forEach(p => {
                     try { p.socket.send(JSON.stringify({ type: 'MATCH_STARTING', humans: finalPlayers.length, bots: finalBots })); } catch(e) {}
                 });
                 this.createMatch(finalPlayers, finalBots);
             }, this.PARTY_WAIT);
+            this.partyGroupTimeouts.set(partyId, waitTimer);
             return;
         }
 
@@ -2106,9 +2117,14 @@ class MatchmakingQueue {
         if (botCount > 0) {
             try {
                 const rankResults = await Promise.all(
-                    players.map(p => p.userUid ? fbRead(`/users/${p.userUid}/rankData`) : Promise.resolve(null))
+                    players.map(p => {
+                        console.log(`🔍 Fetch rank uid="${p.userUid || '(kosong)'}" name="${p.name}"`);
+                        return p.userUid ? fbRead(`/users/${p.userUid}/rankData`) : Promise.resolve(null);
+                    })
                 );
-                for (const rd of rankResults) {
+                for (let i = 0; i < rankResults.length; i++) {
+                    const rd = rankResults[i];
+                    console.log(`📊 ${players[i].name} rankData=${rd ? JSON.stringify(rd) : 'null'}`);
                     if (!rd?.rankName) continue;
                     const rn: string = rd.rankName;
                     if (rn.startsWith("Platinum")) { botLevel = 3; break; }
