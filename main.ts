@@ -2160,17 +2160,42 @@ class MatchmakingQueue {
             if (p.partyId) {
                 const group = this.partyGroups.get(p.partyId);
                 if (group) {
+                    // Kumpulkan anggota party lain sebelum dihapus — akan di-notify
+                    const partyPeers = group.filter(gp => gp.id !== playerId);
+
                     const gi = group.findIndex(gp => gp.id === playerId);
                     if (gi !== -1) group.splice(gi, 1);
+
                     if (group.length === 0) {
                         this.partyGroups.delete(p.partyId);
                         const _pt = this.partyGroupTimeouts.get(p.partyId);
                         if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
                     }
+
+                    // ── PERBAIKAN: Beritahu anggota party yang masih di queue agar batal juga ──
+                    // Hapus semua anggota party yang tersisa dari queue dan kirim sinyal PARTY_SEARCH_CANCELLED
+                    for (const peer of partyPeers) {
+                        const peerIdx = this.queue.findIndex(q => q.id === peer.id);
+                        if (peerIdx !== -1) {
+                            if (this.queue[peerIdx].timeoutId) clearTimeout(this.queue[peerIdx].timeoutId);
+                            this.queue.splice(peerIdx, 1);
+                        }
+                        try {
+                            peer.socket.send(JSON.stringify({
+                                type: 'PARTY_SEARCH_CANCELLED',
+                                cancelledById: playerId,
+                                cancelledByName: p.name
+                            }));
+                        } catch(_) {}
+                    }
+                    // Bersihkan sisa partyGroup untuk partyId ini
+                    this.partyGroups.delete(p.partyId);
+                    const _pt2 = this.partyGroupTimeouts.get(p.partyId);
+                    if (_pt2) { clearTimeout(_pt2); this.partyGroupTimeouts.delete(p.partyId); }
                 }
             }
             this.queue.splice(idx, 1);
-            // Beritahu sisa pemain di antrian dengan jumlah terkini
+            // Beritahu sisa pemain di antrian (non-party) dengan jumlah terkini
             this.queue.forEach(qp => {
                 try { qp.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Mencari lawan... (${this.queue.length}/4)` })); } catch(_) {}
             });
