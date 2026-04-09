@@ -1914,6 +1914,9 @@ interface Player {
 interface PartyLobby {
     id: string; leaderId: string;
     members: { uid: string; name: string; socket: WebSocket }[];
+    // Diisi saat leader tekan Mulai — menyimpan sharedPartyId & ukuran party
+    // agar anggota yang reconnect masih bisa JOIN_MATCHMAKING dengan partyId yang benar
+    queuing?: { sharedPartyId: string; partySize: number; joinedUids: Set<string> };
 }
 
 interface GameRoom {
@@ -2180,6 +2183,8 @@ class MatchmakingQueue {
                     if (gi !== -1) group.splice(gi, 1);
 
                     // Beritahu anggota party lain yang masih di antrian bahwa pencarian dibatalkan
+                    // HANYA jika partyId ini adalah sharedPartyId dari partyGroups (bukan partyLobby)
+                    // — untuk menghindari double-cancel dengan leavePartyLobby
                     if (group.length > 0) {
                         const cancelMsg = JSON.stringify({
                             type: 'PARTY_SEARCH_CANCELLED',
@@ -2527,13 +2532,39 @@ class MatchmakingQueue {
     leavePartyLobby(partyId: string, uid: string) {
         const party = this.partyLobbies.get(partyId);
         if (!party) return;
+
         if (party.leaderId === uid) {
             // Leader keluar → bubarkan party
+            // Jika sedang queuing, keluarkan juga anggota dari antrian
+            if (party.queuing) {
+                party.queuing.joinedUids.forEach(joinedUid => {
+                    const p = this.queue.find(p => p.userUid === joinedUid && p.partyId === party.queuing!.sharedPartyId);
+                    if (p) this.removePlayer(p.id);
+                });
+            }
             this.disbandParty(partyId);
         } else {
+            // Anggota non-leader keluar
             const idx = party.members.findIndex(m => m.uid === uid);
             if (idx !== -1) party.members.splice(idx, 1);
-            this.broadcastPartyUpdate(partyId);
+
+            if (party.queuing) {
+                // Sedang dalam proses masuk antrian — batalkan semua, bubarkan party
+                console.log(`🚫 Party ${partyId} dibatalkan — anggota ${uid} keluar saat queuing`);
+                // Keluarkan semua yang sudah masuk antrian
+                party.queuing.joinedUids.forEach(joinedUid => {
+                    const p = this.queue.find(p => p.userUid === joinedUid && p.partyId === party.queuing!.sharedPartyId);
+                    if (p) this.removePlayer(p.id);
+                });
+                // Beritahu anggota yang tersisa bahwa pencarian dibatalkan
+                const cancelMsg = JSON.stringify({ type: 'PARTY_SEARCH_CANCELLED', cancelledByName: party.members.find(m => m.uid === uid)?.name || uid });
+                party.members.forEach(m => {
+                    if (m.socket.readyState === 1) { try { m.socket.send(cancelMsg); } catch(_) {} }
+                });
+                this.partyLobbies.delete(partyId);
+            } else {
+                this.broadcastPartyUpdate(partyId);
+            }
         }
     }
 
@@ -2543,8 +2574,22 @@ class MatchmakingQueue {
         if (!party) return { success: false, error: 'Party tidak ditemukan' };
         if (party.leaderId !== leaderUid) return { success: false, error: 'Hanya leader yang bisa memulai antrian' };
         if (party.members.length < 2) return { success: false, error: 'Party butuh minimal 2 pemain' };
+
+        // Jika party sudah dalam mode queuing sebelumnya (retry), batalkan antrian lama dulu
+        if (party.queuing) {
+            party.queuing.joinedUids.forEach(uid => {
+                const existing = this.queue.find(p => p.userUid === uid && p.partyId === party.queuing!.sharedPartyId);
+                if (existing) this.removePlayer(existing.id);
+            });
+        }
+
         const sharedPartyId = `qp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const size = party.members.length;
+
+        // Tandai party sebagai sedang queuing — JANGAN hapus dari partyLobbies dulu
+        // Party akan dihapus setelah semua anggota berhasil masuk antrian (JOIN_MATCHMAKING)
+        party.queuing = { sharedPartyId, partySize: size, joinedUids: new Set() };
+
         // Beritahu semua anggota untuk segera kirim JOIN_MATCHMAKING dengan sharedPartyId
         party.members.forEach(m => {
             this.unregisterOnline(m.uid);
@@ -2552,8 +2597,52 @@ class MatchmakingQueue {
                 try { m.socket.send(JSON.stringify({ type: 'PARTY_QUEUING', sharedPartyId, partySize: size })); } catch(_) {}
             }
         });
-        this.partyLobbies.delete(partyId);
+
+        // Safety timeout: jika dalam 15 detik belum semua JOIN_MATCHMAKING, bersihkan party
+        setTimeout(() => {
+            const p = this.partyLobbies.get(partyId);
+            if (p?.queuing?.sharedPartyId === sharedPartyId) {
+                console.log(`⏰ Party ${partyId} queuing timeout — membersihkan`);
+                this.partyLobbies.delete(partyId);
+            }
+        }, 15000);
+
         return { success: true, sharedPartyId, partySize: size };
+    }
+
+    // Update socket anggota party (misalnya setelah reconnect di party lobby)
+    updatePartyMemberSocket(partyId: string, uid: string, socket: WebSocket): boolean {
+        const party = this.partyLobbies.get(partyId);
+        if (!party) return false;
+        const member = party.members.find(m => m.uid === uid);
+        if (!member) return false;
+        member.socket = socket;
+        return true;
+    }
+
+    // Cari party yang sedang queuing berdasarkan uid anggota
+    findQueueingPartyByMember(uid: string): { partyId: string; sharedPartyId: string; partySize: number } | null {
+        for (const [partyId, party] of this.partyLobbies) {
+            if (party.queuing && party.members.some(m => m.uid === uid)) {
+                return { partyId, sharedPartyId: party.queuing.sharedPartyId, partySize: party.queuing.partySize };
+            }
+        }
+        return null;
+    }
+
+    // Dipanggil saat anggota party berhasil JOIN_MATCHMAKING — konfirmasi kehadiran
+    confirmPartyQueueJoin(sharedPartyId: string, uid: string): void {
+        for (const [partyId, party] of this.partyLobbies) {
+            if (party.queuing?.sharedPartyId === sharedPartyId) {
+                party.queuing.joinedUids.add(uid);
+                // Jika semua anggota sudah masuk antrian, hapus party lobby
+                if (party.queuing.joinedUids.size >= party.queuing.partySize) {
+                    console.log(`✅ Party ${partyId} semua anggota masuk antrian — party lobby dihapus`);
+                    this.partyLobbies.delete(partyId);
+                }
+                return;
+            }
+        }
     }
 
     // ============================
@@ -2805,6 +2894,11 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         };
                         // Tidak lagi idle — hapus dari online registry
                         if (data.userUid) matchmaking.unregisterOnline(data.userUid);
+                        // Jika join sebagai anggota party, konfirmasi ke server agar party lobby
+                        // bisa dibersihkan setelah semua anggota masuk antrian
+                        if (data.partyId && data.userUid) {
+                            matchmaking.confirmPartyQueueJoin(data.partyId, data.userUid);
+                        }
                         currentPartyId = null; // sudah masuk queue, bukan lobby lagi
                         matchmaking.addPlayer(currentPlayer);
                         break;
@@ -3128,6 +3222,33 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             // Kembali ke registry agar bisa diundang lagi
                             if (currentPlayer.userUid && currentPlayer.name) {
                                 matchmaking.registerOnline(currentPlayer.userUid, currentPlayer.name, socket);
+                            }
+                        }
+                        break;
+
+                    case 'REJOIN_PARTY_LOBBY':
+                        // Anggota yang disconnect & reconnect cek apakah masih ada party yang menunggu
+                        if (data.userUid && data.playerName) {
+                            const sanitizedName = sanitizeName(data.playerName) || 'Player';
+                            if (!currentPlayer) {
+                                currentPlayer = { id: data.userUid, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
+                            }
+                            // Cek apakah ada party queuing yang masih menunggu anggota ini
+                            const queueingParty = matchmaking.findQueueingPartyByMember(data.userUid);
+                            if (queueingParty) {
+                                // Update socket anggota ke yang baru
+                                matchmaking.updatePartyMemberSocket(queueingParty.partyId, data.userUid, socket);
+                                currentPartyId = queueingParty.partyId;
+                                // Kirim PARTY_QUEUING ulang agar client langsung JOIN_MATCHMAKING
+                                socket.send(JSON.stringify({
+                                    type: 'PARTY_QUEUING',
+                                    sharedPartyId: queueingParty.sharedPartyId,
+                                    partySize: queueingParty.partySize
+                                }));
+                                console.log(`🔄 ${sanitizedName} rejoined queuing party ${queueingParty.partyId}`);
+                            } else {
+                                // Tidak ada party yang menunggu — kembali ke lobby biasa
+                                socket.send(JSON.stringify({ type: 'PARTY_NOT_FOUND' }));
                             }
                         }
                         break;
