@@ -2163,8 +2163,7 @@ class MatchmakingQueue {
                     const gi = group.findIndex(gp => gp.id === playerId);
                     if (gi !== -1) group.splice(gi, 1);
 
-                    // Beritahu anggota party yang masih di antrian bahwa pencarian dibatalkan
-                    // agar mereka kembali ke lobi party (bukan stuck di float bar)
+                    // Beritahu anggota party lain yang masih di antrian bahwa pencarian dibatalkan
                     if (group.length > 0) {
                         const cancelMsg = JSON.stringify({
                             type: 'PARTY_SEARCH_CANCELLED',
@@ -2173,7 +2172,7 @@ class MatchmakingQueue {
                         group.forEach(gp => {
                             try { gp.socket.send(cancelMsg); } catch(_) {}
                         });
-                        // Hapus anggota party yang tersisa dari antrian juga
+                        // Keluarkan anggota party yang tersisa dari antrian
                         group.forEach(gp => {
                             const gIdx = this.queue.findIndex(q => q.id === gp.id);
                             if (gIdx !== -1) {
@@ -2181,19 +2180,13 @@ class MatchmakingQueue {
                                 this.queue.splice(gIdx, 1);
                             }
                         });
-                        this.partyGroups.delete(p.partyId);
-                        const _pt = this.partyGroupTimeouts.get(p.partyId);
-                        if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
-                    } else {
-                        if (group.length === 0) {
-                            this.partyGroups.delete(p.partyId);
-                            const _pt = this.partyGroupTimeouts.get(p.partyId);
-                            if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
-                        }
                     }
+                    this.partyGroups.delete(p.partyId);
+                    const _pt = this.partyGroupTimeouts.get(p.partyId);
+                    if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
                 }
             }
-            // Hapus player yang meminta cancel dari antrian (jika belum terhapus oleh loop di atas)
+            // Hapus player dari antrian (jika belum terhapus)
             const currentIdx = this.queue.findIndex(q => q.id === playerId);
             if (currentIdx !== -1) this.queue.splice(currentIdx, 1);
             // Beritahu sisa pemain di antrian dengan jumlah terkini
