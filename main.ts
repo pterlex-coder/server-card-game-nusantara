@@ -2160,42 +2160,43 @@ class MatchmakingQueue {
             if (p.partyId) {
                 const group = this.partyGroups.get(p.partyId);
                 if (group) {
-                    // Kumpulkan anggota party lain sebelum dihapus — akan di-notify
-                    const partyPeers = group.filter(gp => gp.id !== playerId);
-
                     const gi = group.findIndex(gp => gp.id === playerId);
                     if (gi !== -1) group.splice(gi, 1);
 
-                    if (group.length === 0) {
+                    // Beritahu anggota party yang masih di antrian bahwa pencarian dibatalkan
+                    // agar mereka kembali ke lobi party (bukan stuck di float bar)
+                    if (group.length > 0) {
+                        const cancelMsg = JSON.stringify({
+                            type: 'PARTY_SEARCH_CANCELLED',
+                            cancelledByName: p.name
+                        });
+                        group.forEach(gp => {
+                            try { gp.socket.send(cancelMsg); } catch(_) {}
+                        });
+                        // Hapus anggota party yang tersisa dari antrian juga
+                        group.forEach(gp => {
+                            const gIdx = this.queue.findIndex(q => q.id === gp.id);
+                            if (gIdx !== -1) {
+                                if (this.queue[gIdx].timeoutId) clearTimeout(this.queue[gIdx].timeoutId);
+                                this.queue.splice(gIdx, 1);
+                            }
+                        });
                         this.partyGroups.delete(p.partyId);
                         const _pt = this.partyGroupTimeouts.get(p.partyId);
                         if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
-                    }
-
-                    // ── PERBAIKAN: Beritahu anggota party yang masih di queue agar batal juga ──
-                    // Hapus semua anggota party yang tersisa dari queue dan kirim sinyal PARTY_SEARCH_CANCELLED
-                    for (const peer of partyPeers) {
-                        const peerIdx = this.queue.findIndex(q => q.id === peer.id);
-                        if (peerIdx !== -1) {
-                            if (this.queue[peerIdx].timeoutId) clearTimeout(this.queue[peerIdx].timeoutId);
-                            this.queue.splice(peerIdx, 1);
+                    } else {
+                        if (group.length === 0) {
+                            this.partyGroups.delete(p.partyId);
+                            const _pt = this.partyGroupTimeouts.get(p.partyId);
+                            if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
                         }
-                        try {
-                            peer.socket.send(JSON.stringify({
-                                type: 'PARTY_SEARCH_CANCELLED',
-                                cancelledById: playerId,
-                                cancelledByName: p.name
-                            }));
-                        } catch(_) {}
                     }
-                    // Bersihkan sisa partyGroup untuk partyId ini
-                    this.partyGroups.delete(p.partyId);
-                    const _pt2 = this.partyGroupTimeouts.get(p.partyId);
-                    if (_pt2) { clearTimeout(_pt2); this.partyGroupTimeouts.delete(p.partyId); }
                 }
             }
-            this.queue.splice(idx, 1);
-            // Beritahu sisa pemain di antrian (non-party) dengan jumlah terkini
+            // Hapus player yang meminta cancel dari antrian (jika belum terhapus oleh loop di atas)
+            const currentIdx = this.queue.findIndex(q => q.id === playerId);
+            if (currentIdx !== -1) this.queue.splice(currentIdx, 1);
+            // Beritahu sisa pemain di antrian dengan jumlah terkini
             this.queue.forEach(qp => {
                 try { qp.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Mencari lawan... (${this.queue.length}/4)` })); } catch(_) {}
             });
