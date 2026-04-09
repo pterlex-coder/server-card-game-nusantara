@@ -1955,6 +1955,15 @@ class MatchmakingQueue {
 
         // Kelola partyGroups jika player membawa partyId
         if (player.partyId) {
+            // Batalkan grace-period cancel timer untuk partyId ini jika ada
+            // (player reconnect cepat sebelum timer 3 detik habis)
+            const pendingCancel = this.partyCancelTimers.get(player.partyId);
+            if (pendingCancel) {
+                clearTimeout(pendingCancel);
+                this.partyCancelTimers.delete(player.partyId);
+                console.log(`↩️ Grace cancel dibatalkan — ${player.name} reconnect ke party ${player.partyId}`);
+            }
+
             const group = this.partyGroups.get(player.partyId) || [];
             group.push(player);
             this.partyGroups.set(player.partyId, group);
@@ -1987,12 +1996,21 @@ class MatchmakingQueue {
     private tryMatchParty(partyId: string) {
         const partyPlayers = this.partyGroups.get(partyId);
         if (!partyPlayers || partyPlayers.length < 2) return;
+
+        // Filter hanya yang socketnya masih open — hindari match dengan koneksi mati
+        const livePlayers = partyPlayers.filter(p => p.socket.readyState === 1);
+        if (livePlayers.length < 2) {
+            // Tidak cukup anggota aktif — tunda, beri waktu reconnect
+            this.partyGroups.set(partyId, livePlayers);
+            return;
+        }
+
         this.partyGroups.delete(partyId);
         const _pt = this.partyGroupTimeouts.get(partyId);
         if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(partyId); }
 
-        // Hapus anggota party dari antrian umum
-        partyPlayers.forEach(pp => {
+        // Hapus anggota party (hanya livePlayers) dari antrian umum
+        livePlayers.forEach(pp => {
             const idx = this.queue.findIndex(q => q.id === pp.id);
             if (idx !== -1) {
                 if (this.queue[idx].timeoutId) clearTimeout(this.queue[idx].timeoutId);
@@ -2001,7 +2019,7 @@ class MatchmakingQueue {
         });
 
         // Ambil pemain lain dari antrian umum (non-party)
-        const othersNeeded = this.MATCH_SIZE - partyPlayers.length;
+        const othersNeeded = this.MATCH_SIZE - livePlayers.length;
         const others: Player[] = [];
         for (let i = 0; i < this.queue.length && others.length < othersNeeded; i++) {
             if (!this.queue[i].partyId) {
@@ -2012,22 +2030,22 @@ class MatchmakingQueue {
             }
         }
 
-        const allPlayers = [...partyPlayers, ...others];
+        const allPlayers = [...livePlayers, ...others];
         const botsNeeded = this.MATCH_SIZE - allPlayers.length;
 
         if (others.length < othersNeeded && botsNeeded > 0) {
             // Belum cukup pemain, tunggu PARTY_WAIT ms lalu isi bot
             console.log(`⏳ Party ${partyId} menunggu ${othersNeeded - others.length} pemain lagi (${this.PARTY_WAIT / 1000}s)...`);
-            partyPlayers.forEach(p => {
+            livePlayers.forEach(p => {
                 try { p.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Party ditemukan! Mencari lawan... (${allPlayers.length}/4)` })); } catch(e) {}
             });
-            // Simpan timeout ke partyGroupTimeouts dan kembalikan partyPlayers ke partyGroups
+            // Simpan timeout ke partyGroupTimeouts dan kembalikan livePlayers ke partyGroups
             // agar removePlayer() bisa membatalkan timeout ini jika semua member disconnect/cancel.
             // 'generation' token memastikan timer lama dari siklus sebelumnya tidak overwrite
             // siklus baru yang sudah berjalan dengan partyId yang sama.
-            this.partyGroups.set(partyId, partyPlayers);
+            this.partyGroups.set(partyId, livePlayers);
             const generation = Date.now();
-            (partyPlayers as any)._generation = generation;
+            (livePlayers as any)._generation = generation;
             const waitTimer = setTimeout(() => {
                 this.partyGroupTimeouts.delete(partyId);
                 // Cek generation SEBELUM delete — timer lama tidak boleh overwrite siklus baru
@@ -2049,8 +2067,8 @@ class MatchmakingQueue {
                 }
                 const finalPlayers = [...allPlayers, ...extra].filter(p => p.socket.readyState === 1);
                 // Batalkan jika tidak ada member party yang masih online
-                if (finalPlayers.filter(p => partyPlayers.some(pp => pp.id === p.id)).length === 0) {
-                    console.log(`\uD83D\uDEAB Party ${partyId} dibatalkan \u2014 semua member sudah disconnect`);
+                if (finalPlayers.filter(p => livePlayers.some(pp => pp.id === p.id)).length === 0) {
+                    console.log(`🚫 Party ${partyId} dibatalkan — semua member sudah disconnect`);
                     extra.forEach(p => { this.queue.unshift(p); });
                     return;
                 }
@@ -2180,11 +2198,19 @@ class MatchmakingQueue {
         }, 6000);
     }
 
+    // partyId → timer yang menunggu sebelum kick anggota lain
+    private partyCancelTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+
     removePlayer(playerId: string) {
         const idx = this.queue.findIndex(p => p.id === playerId);
         if (idx !== -1) {
             const p = this.queue[idx];
             if (p.timeoutId) clearTimeout(p.timeoutId);
+
+            // Hapus player dari antrian segera
+            const currentIdx = this.queue.findIndex(q => q.id === playerId);
+            if (currentIdx !== -1) this.queue.splice(currentIdx, 1);
+
             // Bersihkan dari partyGroups jika ada
             if (p.partyId) {
                 const group = this.partyGroups.get(p.partyId);
@@ -2192,35 +2218,61 @@ class MatchmakingQueue {
                     const gi = group.findIndex(gp => gp.id === playerId);
                     if (gi !== -1) group.splice(gi, 1);
 
-                    // Beritahu anggota party lain yang masih di antrian bahwa pencarian dibatalkan
-                    // HANYA jika partyId ini adalah sharedPartyId dari partyGroups (bukan partyLobby)
-                    // — untuk menghindari double-cancel dengan leavePartyLobby
                     if (group.length > 0) {
-                        const cancelMsg = JSON.stringify({
-                            type: 'PARTY_SEARCH_CANCELLED',
-                            cancelledByName: p.name
-                        });
-                        group.forEach(gp => {
-                            try { gp.socket.send(cancelMsg); } catch(_) {}
-                        });
-                        // Keluarkan anggota party yang tersisa dari antrian
-                        group.forEach(gp => {
-                            const gIdx = this.queue.findIndex(q => q.id === gp.id);
-                            if (gIdx !== -1) {
-                                if (this.queue[gIdx].timeoutId) clearTimeout(this.queue[gIdx].timeoutId);
-                                this.queue.splice(gIdx, 1);
+                        // ── GRACE PERIOD 3 DETIK ──────────────────────────────────────
+                        // Jangan langsung kick anggota lain. Beri waktu 3 detik agar
+                        // player yang terputus sejenak (tekan ✖ lalu Mulai lagi) bisa
+                        // reconnect dengan partyId yang sama sebelum group dihancurkan.
+                        // Jika dalam 3 detik player baru dengan partyId yang sama masuk
+                        // → timer dibatalkan di addPlayer().
+                        const partyId = p.partyId;
+                        // Batalkan timer grace lama untuk partyId ini (jika ada)
+                        const existingTimer = this.partyCancelTimers.get(partyId);
+                        if (existingTimer) clearTimeout(existingTimer);
+
+                        const cancelTimer = setTimeout(() => {
+                            this.partyCancelTimers.delete(partyId);
+                            const currentGroup = this.partyGroups.get(partyId);
+                            if (!currentGroup || currentGroup.length === 0) return;
+
+                            // Beritahu anggota yang tersisa bahwa pencarian dibatalkan
+                            const cancelMsg = JSON.stringify({
+                                type: 'PARTY_SEARCH_CANCELLED',
+                                cancelledByName: p.name
+                            });
+                            currentGroup.forEach(gp => {
+                                try { gp.socket.send(cancelMsg); } catch(_) {}
+                            });
+                            // Keluarkan anggota party yang tersisa dari antrian
+                            currentGroup.forEach(gp => {
+                                const gIdx = this.queue.findIndex(q => q.id === gp.id);
+                                if (gIdx !== -1) {
+                                    if (this.queue[gIdx].timeoutId) clearTimeout(this.queue[gIdx].timeoutId);
+                                    this.queue.splice(gIdx, 1);
+                                }
+                            });
+                            this.partyGroups.delete(partyId);
+                            const _pt = this.partyGroupTimeouts.get(partyId);
+                            if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(partyId); }
+                            // Beritahu sisa pemain di antrian dengan jumlah terkini
+                            this.queue.forEach(qp => {
+                                try { qp.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Mencari lawan... (${this.queue.length}/4)` })); } catch(_) {}
+                            });
+                            if (this.queue.length > 0 && !this.queue[0].timeoutId) {
+                                this.queue[0].timeoutId = setTimeout(() => this.handleTimeout(), this.WAIT_TIMEOUT) as unknown as number;
                             }
-                        });
+                        }, 3000);
+                        this.partyCancelTimers.set(partyId, cancelTimer);
+                    } else {
+                        // Grup kosong — tidak ada yang perlu di-kick
+                        this.partyGroups.delete(p.partyId);
+                        const _pt = this.partyGroupTimeouts.get(p.partyId);
+                        if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
                     }
-                    this.partyGroups.delete(p.partyId);
-                    const _pt = this.partyGroupTimeouts.get(p.partyId);
-                    if (_pt) { clearTimeout(_pt); this.partyGroupTimeouts.delete(p.partyId); }
                 }
             }
-            // Hapus player dari antrian (jika belum terhapus)
-            const currentIdx = this.queue.findIndex(q => q.id === playerId);
-            if (currentIdx !== -1) this.queue.splice(currentIdx, 1);
-            // Beritahu sisa pemain di antrian dengan jumlah terkini
+
+            // Beritahu sisa pemain di antrian dengan jumlah terkini (non-party)
             this.queue.forEach(qp => {
                 try { qp.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Mencari lawan... (${this.queue.length}/4)` })); } catch(_) {}
             });
