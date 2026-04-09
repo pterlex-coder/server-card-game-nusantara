@@ -2021,11 +2021,21 @@ class MatchmakingQueue {
             partyPlayers.forEach(p => {
                 try { p.socket.send(JSON.stringify({ type: 'QUEUE_STATUS', message: `Party ditemukan! Mencari lawan... (${allPlayers.length}/4)` })); } catch(e) {}
             });
-            // FIX: Simpan timeout ke partyGroupTimeouts dan kembalikan partyPlayers ke partyGroups
+            // Simpan timeout ke partyGroupTimeouts dan kembalikan partyPlayers ke partyGroups
             // agar removePlayer() bisa membatalkan timeout ini jika semua member disconnect/cancel.
+            // 'generation' token memastikan timer lama dari siklus sebelumnya tidak overwrite
+            // siklus baru yang sudah berjalan dengan partyId yang sama.
             this.partyGroups.set(partyId, partyPlayers);
+            const generation = Date.now();
+            (partyPlayers as any)._generation = generation;
             const waitTimer = setTimeout(() => {
                 this.partyGroupTimeouts.delete(partyId);
+                // Cek generation SEBELUM delete — timer lama tidak boleh overwrite siklus baru
+                const currentGroup = this.partyGroups.get(partyId);
+                if (currentGroup && (currentGroup as any)._generation !== generation) {
+                    // Siklus baru sudah berjalan dengan partyId ini — batalkan timer lama
+                    return;
+                }
                 this.partyGroups.delete(partyId);
                 const extraNeeded = this.MATCH_SIZE - allPlayers.length;
                 const extra: Player[] = [];
