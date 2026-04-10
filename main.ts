@@ -3096,6 +3096,12 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                                         room.finishedAt = Date.now();
                                         console.log(`🏁 Room ${data.roomId} selesai - spectator pergi, tidak ada pemain manusia tersisa`);
                                     }
+                                    // [FIX] Reset currentCustomRoomId agar spectator host bisa
+                                    // membuat custom room baru setelah keluar dari pertandingan
+                                    if (currentCustomRoomId === data.roomId) {
+                                        currentCustomRoomId = null;
+                                        isCustomRoomSpectator = false;
+                                    }
                                 } else if (currentPlayer) {
                                     const allLeft = room.gameEngine.markPlayerLeft(currentPlayer.id);
                                     if (allLeft) {
@@ -3564,6 +3570,9 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                     }
                     // Untuk pemain biasa di custom room, auto-mode timer di bawah menangani disconnect
                 }
+                // [FIX] Selalu reset state socket setelah cleanup agar tidak blocking sesi berikutnya
+                currentCustomRoomId = null;
+                isCustomRoomSpectator = false;
             }
 
             // Cleanup party lobby jika masih di dalamnya
