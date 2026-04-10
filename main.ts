@@ -3428,7 +3428,12 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         const requestingUid = currentPlayer?.userUid ?? crRoom?.hostUid;
                         if (currentCustomRoomId && requestingUid) {
                             const level = Math.min(Math.max(parseInt(data.level, 10) || 1, 1), 3);
-                            const slotPosition = Math.min(Math.max(parseInt(data.slotPosition, 10) || 2, 1), 4);
+                            const rawSlot = parseInt(data.slotPosition, 10);
+                            if (isNaN(rawSlot) || rawSlot < 1 || rawSlot > 4) {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: 'Posisi slot tidak valid' }));
+                                break;
+                            }
+                            const slotPosition = rawSlot;
                             const addRes = matchmaking.addBotSlotToCustomRoom(currentCustomRoomId, level, requestingUid, slotPosition);
                             if (addRes.success) {
                                 matchmaking.broadcastPendingCustomRoomUpdate(currentCustomRoomId);
@@ -3443,7 +3448,12 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         const crRoom2 = currentCustomRoomId ? matchmaking.getPendingCustomRoom(currentCustomRoomId) : null;
                         const requestingUid2 = currentPlayer?.userUid ?? crRoom2?.hostUid;
                         if (currentCustomRoomId && requestingUid2) {
-                            const slotPosition = Math.min(Math.max(parseInt(data.slotPosition, 10) || 2, 1), 4);
+                            const rawSlot2 = parseInt(data.slotPosition, 10);
+                            if (isNaN(rawSlot2) || rawSlot2 < 1 || rawSlot2 > 4) {
+                                socket.send(JSON.stringify({ type: 'ERROR', message: 'Posisi slot tidak valid' }));
+                                break;
+                            }
+                            const slotPosition = rawSlot2;
                             const remRes = matchmaking.removeBotSlotFromCustomRoom(currentCustomRoomId, slotPosition, requestingUid2);
                             if (remRes.success) {
                                 matchmaking.broadcastPendingCustomRoomUpdate(currentCustomRoomId);
