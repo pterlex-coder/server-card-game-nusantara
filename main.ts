@@ -868,26 +868,9 @@ class GameEngine {
     addSpectator(socket: WebSocket, userUid?: string) {
         this.spectatorSockets.push(socket);
         if (userUid && !this.spectatorUserUids.includes(userUid)) this.spectatorUserUids.push(userUid);
+        this._spectatorLeft = false; // spectator aktif, belum pergi
     }
-    removeSpectator(socket: WebSocket, userUid?: string) {
-        this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket);
-        // Hapus uid dari registry agar spectator tidak diblokir saat mau mulai match baru
-        if (userUid) {
-            this.spectatorUserUids = this.spectatorUserUids.filter(u => u !== userUid);
-        }
-        // Jika spectator terakhir pergi dan semua player manusia juga sudah meninggalkan
-        // match, baru jalankan cleanup (sebelumnya ditunda karena spectator masih aktif)
-        const hasActiveSpectator = this.spectatorSockets.some(s => s.readyState === 1);
-        if (!hasActiveSpectator) {
-            const allHumansLeft = this.gs.players
-                .filter(p => !p.isBot)
-                .every(p => p.leftMatch);
-            if (allHumansLeft && !this.gs.gameOver) {
-                console.log(`👁️ Spectator terakhir keluar & semua player sudah pergi — cleanup match`);
-                this.cleanupMatch();
-            }
-        }
-    }
+    removeSpectator(socket: WebSocket) { this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket); }
 
     setSelectedProvinces(provinces: string[]) {
         this.selectedProvinces = provinces;
@@ -1716,8 +1699,11 @@ class GameEngine {
         if (this.onGameOver) setTimeout(() => this.onGameOver!(), 2000);
     }
 
+    // null = tidak ada spectator di room ini; false = ada spectator, belum pergi; true = spectator sudah pergi
+    _spectatorLeft: boolean | null = null;
+
     // Dipanggil ketika player secara eksplisit menekan "Kembali ke Home".
-    // Jika semua pemain manusia sudah meninggalkan match DAN tidak ada spectator aktif, baru cleanup.
+    // Jika semua pemain manusia sudah meninggalkan match, langsung cleanup.
     markPlayerLeft(playerId: string): boolean {
         const player = this.gs.players.find(p => p.id === playerId);
         if (!player || player.isBot) return false;
@@ -1725,18 +1711,33 @@ class GameEngine {
 
         const humans = this.gs.players.filter(p => !p.isBot);
         const leftCount = humans.filter(p => p.leftMatch).length;
-        console.log(`🚪 ${player.name} keluar (${leftCount}/${humans.length} manusia pergi)`);
+        console.log(`🚪 ${player.name} keluar (${leftCount}/${humans.length} manusia pergi, spectator: ${this._spectatorLeft === null ? 'tidak ada' : this._spectatorLeft ? 'sudah pergi' : 'masih menonton'})`);
+
+        // Jangan cleanup jika masih ada spectator yang belum pergi
+        if (this._spectatorLeft === false) return false;
 
         if (leftCount >= humans.length) {
-            // Jangan cleanup jika masih ada spectator aktif yang terhubung
-            // (misalnya host custom room yang berperan sebagai penonton)
-            const hasActiveSpectator = this.spectatorSockets.some(s => s.readyState === 1);
-            if (hasActiveSpectator) {
-                console.log(`👁️ Semua player pergi tapi masih ada spectator aktif — match tetap berjalan`);
-                return false;
-            }
             this.cleanupMatch();
             return true; // sinyal ke MatchmakingQueue untuk set status 'finished'
+        }
+        return false;
+    }
+
+    // Dipanggil ketika spectator-host menekan "Kembali ke Home".
+    markSpectatorLeft(): boolean {
+        this._spectatorLeft = true;
+        // Hapus socket spectator agar tidak ada pesan yang dikirim lebih lanjut
+        this.spectatorSockets = [];
+        this.spectatorUserUids = [];
+
+        // Periksa apakah semua pemain manusia juga sudah pergi
+        const humans = this.gs.players.filter(p => !p.isBot);
+        const leftCount = humans.filter(p => p.leftMatch).length;
+        console.log(`🚪 Spectator keluar (${leftCount}/${humans.length} pemain manusia sudah pergi)`);
+
+        if (leftCount >= humans.length) {
+            this.cleanupMatch();
+            return true;
         }
         return false;
     }
@@ -3039,23 +3040,24 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
 
                     case 'LEAVE_MATCH':
                         // Player secara eksplisit memilih "Kembali ke Home"
-                        if (isCustomRoomSpectator && currentCustomRoomId) {
-                            // Spectator (host penonton) keluar dari match yang sedang berjalan
-                            const specRoom = matchmaking.getRoom(currentCustomRoomId);
-                            if (specRoom?.gameEngine) {
-                                // Hapus socket & uid agar spectator tidak diblokir saat mau main baru
-                                specRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid || data.userUid);
-                            }
-                            currentCustomRoomId = null;
-                            isCustomRoomSpectator = false;
-                        } else if (currentPlayer && data.roomId) {
+                        if (data.roomId) {
                             const room = matchmaking.getRoom(data.roomId);
                             if (room && room.status === 'playing') {
-                                const allLeft = room.gameEngine.markPlayerLeft(currentPlayer.id);
-                                if (allLeft) {
-                                    room.status = 'finished';
-                                    room.finishedAt = Date.now();
-                                    console.log(`🏁 Room ${data.roomId} selesai - semua pemain manusia telah pergi`);
+                                if (data.isSpectator) {
+                                    // Host spectator keluar — panggil markSpectatorLeft
+                                    const allLeft = room.gameEngine.markSpectatorLeft();
+                                    if (allLeft) {
+                                        room.status = 'finished';
+                                        room.finishedAt = Date.now();
+                                        console.log(`🏁 Room ${data.roomId} selesai - spectator pergi, tidak ada pemain manusia tersisa`);
+                                    }
+                                } else if (currentPlayer) {
+                                    const allLeft = room.gameEngine.markPlayerLeft(currentPlayer.id);
+                                    if (allLeft) {
+                                        room.status = 'finished';
+                                        room.finishedAt = Date.now();
+                                        console.log(`🏁 Room ${data.roomId} selesai - semua pemain manusia telah pergi`);
+                                    }
                                 }
                             }
                         }
@@ -3483,10 +3485,8 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                 } else if (activeRoom?.gameEngine) {
                     // Game sudah berjalan
                     if (isCustomRoomSpectator) {
-                        // Spectator disconnect: hapus socket & uid dari gameEngine
-                        // Meneruskan userUid agar spectatorUserUids ikut dibersihkan,
-                        // sehingga host penonton tidak diblokir saat mau mulai match baru.
-                        activeRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid);
+                        // Spectator disconnect: cukup hapus dari gameEngine
+                        activeRoom.gameEngine.removeSpectator(socket);
                     }
                     // Untuk pemain biasa di custom room, auto-mode timer di bawah menangani disconnect
                 }
