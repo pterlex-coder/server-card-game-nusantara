@@ -1768,6 +1768,8 @@ class GameEngine {
         // Bersihkan referensi spectator socket agar tidak memory leak
         this.spectatorSockets = [];
         this.spectatorUserUids = [];
+        // Panggil onGameOver agar room dihapus dari memori setelah 60 detik
+        if (this.onGameOver) setTimeout(() => this.onGameOver!(), 2000);
     }
 
     getFullState() {
@@ -3317,9 +3319,11 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             const _leavingActiveRoom = matchmaking.getRoom(currentCustomRoomId);
                             if (_leavingRoom && !_leavingRoom.started) {
                                 // Room masih di lobby — jalankan cleanup normal
+                                if (isCustomRoomSpectator) console.log(`👁️ Spectator keluar dari lobby: room ${currentCustomRoomId}`);
                                 matchmaking.leavePendingCustomRoom(currentCustomRoomId, currentPlayer?.userUid || data.userUid || '', isCustomRoomSpectator);
                             } else if (_leavingActiveRoom?.gameEngine && isCustomRoomSpectator) {
                                 // Game sudah berjalan, yang keluar adalah spectator — hapus dari gameEngine
+                                console.log(`👁️ Spectator keluar dari game aktif: room ${currentCustomRoomId} → uid dibersihkan`);
                                 _leavingActiveRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid || data.userUid || '');
                             }
                             // Selalu reset state socket agar bisa buat/join room baru
@@ -3577,6 +3581,7 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                 } else if (activeRoom?.gameEngine) {
                     // Game sudah berjalan
                     if (isCustomRoomSpectator) {
+                        console.log(`👁️ Spectator DISCONNECT (koneksi putus): room ${currentCustomRoomId}, uid: ${currentPlayer?.userUid || "unknown"} → uid dibersihkan`);
                         // Spectator disconnect: cukup hapus dari gameEngine
                         activeRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid || '');
                         // [FIX] Reset state socket spectator — mereka tidak bisa reconnect,
