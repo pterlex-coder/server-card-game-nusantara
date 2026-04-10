@@ -3214,10 +3214,6 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             const success = matchmaking.rejoinAsSpectator(data.roomId, data.userUid, socket);
                             if (success) {
                                 isCustomRoomSpectator = true;
-                                if (!currentPlayer && data.userUid && data.playerName) {
-                                    const rName = sanitizeName(data.playerName) || 'Spectator';
-                                    currentPlayer = { id: data.userUid, name: rName, socket, joinTime: Date.now(), userUid: data.userUid };
-                                }
                                 currentCustomRoomId = data.roomId;
                                 const room = matchmaking.getRoom(data.roomId);
                                 if (room) {
@@ -3266,9 +3262,6 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             isCustomRoomSpectator = data.role === 'penonton';
                             if (data.role === 'pemain' && crResult.hostPlayerId) {
                                 currentPlayer = { id: crResult.hostPlayerId, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
-                            } else if (data.role === 'penonton') {
-                                // Simpan identitas spectator-host agar onclose bisa cleanup dengan uid yang benar
-                                currentPlayer = { id: data.userUid, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
                             }
                             socket.send(JSON.stringify({ type: 'CUSTOM_ROOM_CREATED', roomId: crResult.roomId }));
                         }
