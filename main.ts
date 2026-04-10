@@ -2465,16 +2465,44 @@ class MatchmakingQueue {
     broadcastPendingCustomRoomUpdate(roomId: string) {
         const room = this.pendingCustomRooms.get(roomId);
         if (!room) return;
-        const humanSlots = room.players.map((p, i) => ({ slot: i + 1, name: p.name, uid: p.userUid, isBot: false }));
-        const botSlotsInfo = Object.entries(room.botSlots).map(([pos, b]) => ({
-            slot: parseInt(pos),
-            name: `Bot Lv${b.level}`, level: b.level, isBot: true, uid: null
-        }));
-        const totalSlots = humanSlots.length + botSlotsInfo.length;
+
+        const slots: { slot: number; name: string; uid: string | null; isBot: boolean; level?: number }[] = [];
+
+        if (room.hostRole === 'pemain') {
+            // Slot 1 selalu milik host (pemain)
+            const hostPlayer = room.players.find(p => p.userUid === room.hostUid);
+            if (hostPlayer) {
+                slots.push({ slot: 1, name: hostPlayer.name, uid: hostPlayer.userUid, isBot: false });
+            }
+            // Pemain lain mengisi slot 2-4, lewati slot yang sudah ditempati bot
+            const otherPlayers = room.players.filter(p => p.userUid !== room.hostUid);
+            let nextHumanSlot = 2;
+            for (const p of otherPlayers) {
+                while (nextHumanSlot <= 4 && room.botSlots[nextHumanSlot]) nextHumanSlot++;
+                if (nextHumanSlot > 4) break;
+                slots.push({ slot: nextHumanSlot, name: p.name, uid: p.userUid, isBot: false });
+                nextHumanSlot++;
+            }
+        } else {
+            // Host penonton — semua slot untuk pemain, lewati slot yang ada botnya
+            let nextHumanSlot = 1;
+            for (const p of room.players) {
+                while (nextHumanSlot <= 4 && room.botSlots[nextHumanSlot]) nextHumanSlot++;
+                if (nextHumanSlot > 4) break;
+                slots.push({ slot: nextHumanSlot, name: p.name, uid: p.userUid, isBot: false });
+                nextHumanSlot++;
+            }
+        }
+
+        // Bot slots — gunakan posisi asli dari key (tidak berubah)
+        Object.entries(room.botSlots).forEach(([pos, b]) => {
+            slots.push({ slot: parseInt(pos), name: `Bot Lv${b.level}`, level: b.level, isBot: true, uid: null });
+        });
+
+        const totalSlots = slots.length;
         const msg = JSON.stringify({
             type: 'CUSTOM_ROOM_UPDATE', roomId,
-            slots: [...humanSlots, ...botSlotsInfo],
-            totalSlots, hostRole: room.hostRole, hostUid: room.hostUid
+            slots, totalSlots, hostRole: room.hostRole, hostUid: room.hostUid
         });
         room.players.forEach(p => { if (p.socket.readyState === 1) { try { p.socket.send(msg); } catch(_) {} } });
         if (room.spectatorSocket?.readyState === 1) { try { room.spectatorSocket.send(msg); } catch(_) {} }
@@ -2743,8 +2771,20 @@ class MatchmakingQueue {
         const minSlot = room.hostRole === 'pemain' ? 2 : 1;
         if (slotPosition < minSlot || slotPosition > 4) return { success: false, error: 'Posisi slot tidak valid' };
         if (room.botSlots[slotPosition]) return { success: false, error: 'Slot sudah ada bot' };
-        const humanAtSlot = room.players.some((_, i) => i + 1 === slotPosition);
-        if (humanAtSlot) return { success: false, error: 'Slot sudah ditempati pemain' };
+        // Cek apakah slot ditempati host (slot 1 selalu host jika hostRole='pemain')
+        if (room.hostRole === 'pemain' && slotPosition === 1) return { success: false, error: 'Slot sudah ditempati pemain (host)' };
+        // Cek apakah slot ditempati pemain lain — hitung posisi slot mereka secara dinamis
+        const occupiedByHuman = (() => {
+            const otherPlayers = room.players.filter(p => p.userUid !== room.hostUid);
+            let nextSlot = room.hostRole === 'pemain' ? 2 : 1;
+            for (const _ of otherPlayers) {
+                while (nextSlot <= 4 && room.botSlots[nextSlot]) nextSlot++;
+                if (nextSlot === slotPosition) return true;
+                nextSlot++;
+            }
+            return false;
+        })();
+        if (occupiedByHuman) return { success: false, error: 'Slot sudah ditempati pemain' };
         if (room.players.length + Object.keys(room.botSlots).length >= 4) return { success: false, error: 'Room sudah penuh (maks 4 slot)' };
         if (level < 1 || level > 3) return { success: false, error: 'Level bot harus 1–3' };
         room.botSlots[slotPosition] = { level };
@@ -2791,12 +2831,14 @@ class MatchmakingQueue {
         const target = this.onlineRegistry.get(toUid);
         if (!target || target.socket.readyState !== 1) return { success: false, error: 'Pemain tidak tersedia (offline/sibuk)' };
         const fromPlayer = room.players.find(p => p.userUid === fromUid);
+        // Fallback ke spectatorName jika host berperan sebagai penonton
+        const fromName = fromPlayer?.name ?? room.spectatorName ?? 'Host';
         const inviteId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        this.pendingInvites.set(inviteId, { fromUid, fromName: fromPlayer?.name ?? 'Host', roomId, toUid });
+        this.pendingInvites.set(inviteId, { fromUid, fromName, roomId, toUid });
         try {
             target.socket.send(JSON.stringify({
                 type: 'ROOM_INVITE', inviteId, roomId,
-                fromName: fromPlayer?.name ?? 'Host'
+                fromName
             }));
         } catch (_) {
             this.pendingInvites.delete(inviteId);
@@ -2816,9 +2858,12 @@ class MatchmakingQueue {
         const room = this.pendingCustomRooms.get(invite.roomId);
         const notifyHost = (msg: object) => {
             if (!room) return;
+            // Host bisa sebagai pemain (ada di room.players) atau penonton (spectatorSocket)
             const hostPlayer = room.players.find(p => p.userUid === invite.fromUid);
-            if (hostPlayer?.socket.readyState === 1) {
-                try { hostPlayer.socket.send(JSON.stringify(msg)); } catch (_) {}
+            const hostSocket = hostPlayer?.socket
+                ?? (room.spectatorUid === invite.fromUid ? room.spectatorSocket : undefined);
+            if (hostSocket?.readyState === 1) {
+                try { hostSocket.send(JSON.stringify(msg)); } catch (_) {}
             }
         };
         if (!accepted) {
