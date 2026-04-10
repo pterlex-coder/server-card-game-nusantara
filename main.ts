@@ -3223,6 +3223,16 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         break;
 
                     case 'CREATE_CUSTOM_ROOM':
+                        // Auto-clear jika currentCustomRoomId merujuk ke room yang sudah tidak ada
+                        // (misalnya host penonton keluar saat game berjalan lalu game selesai)
+                        if (currentCustomRoomId) {
+                            const _staleP = matchmaking.getPendingCustomRoom(currentCustomRoomId);
+                            const _staleA = matchmaking.getRoom(currentCustomRoomId);
+                            if (!_staleP && !_staleA) {
+                                currentCustomRoomId = null;
+                                isCustomRoomSpectator = false;
+                            }
+                        }
                         if (currentCustomRoomId || (data.userUid && matchmaking.findRoomByUserUid(data.userUid))) {
                             socket.send(JSON.stringify({ type: 'ERROR', message: 'Sudah berada di room lain. Keluar dulu.' }));
                         } else if (data.playerName && data.userUid && (data.role === 'pemain' || data.role === 'penonton')) {
@@ -3285,7 +3295,16 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
 
                     case 'LEAVE_CUSTOM_ROOM':
                         if (currentCustomRoomId) {
-                            matchmaking.leavePendingCustomRoom(currentCustomRoomId, currentPlayer?.userUid || data.userUid || '', isCustomRoomSpectator);
+                            const _leavingRoom = matchmaking.getPendingCustomRoom(currentCustomRoomId);
+                            const _leavingActiveRoom = matchmaking.getRoom(currentCustomRoomId);
+                            if (_leavingRoom && !_leavingRoom.started) {
+                                // Room masih di lobby — jalankan cleanup normal
+                                matchmaking.leavePendingCustomRoom(currentCustomRoomId, currentPlayer?.userUid || data.userUid || '', isCustomRoomSpectator);
+                            } else if (_leavingActiveRoom?.gameEngine && isCustomRoomSpectator) {
+                                // Game sudah berjalan, yang keluar adalah spectator — hapus dari gameEngine
+                                _leavingActiveRoom.gameEngine.removeSpectator(socket);
+                            }
+                            // Selalu reset state socket agar bisa buat/join room baru
                             currentCustomRoomId = null;
                             isCustomRoomSpectator = false;
                         }
