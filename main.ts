@@ -3567,12 +3567,14 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                     if (isCustomRoomSpectator) {
                         // Spectator disconnect: cukup hapus dari gameEngine
                         activeRoom.gameEngine.removeSpectator(socket);
+                        // [FIX] Reset state socket spectator — mereka tidak bisa reconnect,
+                        // jadi tidak perlu dipertahankan. Ini mencegah blocking CREATE_CUSTOM_ROOM baru.
+                        currentCustomRoomId = null;
+                        isCustomRoomSpectator = false;
                     }
                     // Untuk pemain biasa di custom room, auto-mode timer di bawah menangani disconnect
+                    // currentCustomRoomId TIDAK di-reset agar server bisa identifikasi room saat reconnect
                 }
-                // [FIX] Selalu reset state socket setelah cleanup agar tidak blocking sesi berikutnya
-                currentCustomRoomId = null;
-                isCustomRoomSpectator = false;
             }
 
             // Cleanup party lobby jika masih di dalamnya
