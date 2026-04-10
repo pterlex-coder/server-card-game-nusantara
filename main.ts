@@ -870,7 +870,10 @@ class GameEngine {
         if (userUid && !this.spectatorUserUids.includes(userUid)) this.spectatorUserUids.push(userUid);
         this._spectatorLeft = false; // spectator aktif, belum pergi
     }
-    removeSpectator(socket: WebSocket) { this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket); }
+    removeSpectator(socket: WebSocket, userUid?: string) {
+        this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket);
+        if (userUid) this.spectatorUserUids = this.spectatorUserUids.filter(u => u !== userUid);
+    }
 
     setSelectedProvinces(provinces: string[]) {
         this.selectedProvinces = provinces;
@@ -3239,6 +3242,15 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                                 isCustomRoomSpectator = false;
                             }
                         }
+                        // [FIX] Auto-clear jika uid spectator masih nyangkut di active room
+                        // (terjadi bila removeSpectator sebelumnya tidak menghapus dari spectatorUserUids)
+                        if (!currentCustomRoomId && data.userUid) {
+                            const _staleFound = matchmaking.findRoomByUserUid(data.userUid);
+                            if (_staleFound?.isSpectator) {
+                                const _staleRoom = matchmaking.getRoom(_staleFound.roomId);
+                                if (_staleRoom?.gameEngine) _staleRoom.gameEngine.removeSpectator(socket, data.userUid);
+                            }
+                        }
                         if (currentCustomRoomId || (data.userUid && matchmaking.findRoomByUserUid(data.userUid))) {
                             socket.send(JSON.stringify({ type: 'ERROR', message: 'Sudah berada di room lain. Keluar dulu.' }));
                         } else if (data.playerName && data.userUid && (data.role === 'pemain' || data.role === 'penonton')) {
@@ -3308,7 +3320,7 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                                 matchmaking.leavePendingCustomRoom(currentCustomRoomId, currentPlayer?.userUid || data.userUid || '', isCustomRoomSpectator);
                             } else if (_leavingActiveRoom?.gameEngine && isCustomRoomSpectator) {
                                 // Game sudah berjalan, yang keluar adalah spectator — hapus dari gameEngine
-                                _leavingActiveRoom.gameEngine.removeSpectator(socket);
+                                _leavingActiveRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid || data.userUid || '');
                             }
                             // Selalu reset state socket agar bisa buat/join room baru
                             currentCustomRoomId = null;
@@ -3566,7 +3578,7 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                     // Game sudah berjalan
                     if (isCustomRoomSpectator) {
                         // Spectator disconnect: cukup hapus dari gameEngine
-                        activeRoom.gameEngine.removeSpectator(socket);
+                        activeRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid || '');
                         // [FIX] Reset state socket spectator — mereka tidak bisa reconnect,
                         // jadi tidak perlu dipertahankan. Ini mencegah blocking CREATE_CUSTOM_ROOM baru.
                         currentCustomRoomId = null;
