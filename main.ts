@@ -873,6 +873,19 @@ class GameEngine {
     removeSpectator(socket: WebSocket, userUid?: string) {
         this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket);
         if (userUid) this.spectatorUserUids = this.spectatorUserUids.filter(u => u !== userUid);
+
+        // Jika spectator disconnect (putus koneksi) dan spectatorSockets kosong,
+        // tandai sebagai "spectator sudah pergi" agar cleanup bisa berjalan
+        // jika semua pemain manusia juga sudah leftMatch.
+        if (this.spectatorSockets.length === 0 && this._spectatorLeft === false) {
+            this._spectatorLeft = true;
+            const humans = this.gs.players.filter(p => !p.isBot);
+            const leftCount = humans.filter(p => p.leftMatch).length;
+            console.log(`👁️ Spectator socket habis (disconnect). leftCount=${leftCount}/${humans.length}`);
+            if (leftCount >= humans.length) {
+                this.cleanupMatch();
+            }
+        }
     }
 
     setSelectedProvinces(provinces: string[]) {
@@ -3590,11 +3603,32 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                     if (isCustomRoomSpectator) {
                         console.log(`👁️ Spectator DISCONNECT (koneksi putus): room ${currentCustomRoomId}, uid: ${currentPlayer?.userUid || "unknown"} → uid dibersihkan`);
                         // Spectator disconnect: cukup hapus dari gameEngine
+                        // removeSpectator kini juga trigger cleanupMatch jika semua player sudah leftMatch
                         activeRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid || '');
                         // [FIX] Reset state socket spectator — mereka tidak bisa reconnect,
                         // jadi tidak perlu dipertahankan. Ini mencegah blocking CREATE_CUSTOM_ROOM baru.
                         currentCustomRoomId = null;
                         isCustomRoomSpectator = false;
+                    } else if (currentPlayer && activeRoom.gameEngine.isCustomRoom) {
+                        // Pemain custom room disconnect (bukan klik tombol) — tandai leftMatch
+                        // setelah delay 30 detik jika tidak reconnect.
+                        // Ini menangani kasus: semua pemain disconnect tanpa klik tombol kembali,
+                        // spectator sudah pergi → match tidak stuck selamanya.
+                        const _capturedRoomId = currentCustomRoomId;
+                        const _capturedPlayerId = currentPlayer.id;
+                        setTimeout(() => {
+                            const _r = matchmaking.getRoom(_capturedRoomId!);
+                            if (!_r || _r.gameEngine.gs.gameOver) return;
+                            const _gp = _r.gameEngine.getPlayerById(_capturedPlayerId);
+                            // Hanya lanjutkan jika player masih disconnect (autoMode = true, belum reconnect)
+                            if (!_gp || !_gp.autoMode || _gp.leftMatch) return;
+                            console.log(`⏱️ Custom room: ${_gp.name} tidak reconnect setelah 30s → tandai leftMatch`);
+                            const allLeft = _r.gameEngine.markPlayerLeft(_capturedPlayerId);
+                            if (allLeft) {
+                                _r.status = 'finished';
+                                _r.finishedAt = Date.now();
+                            }
+                        }, 30000);
                     }
                     // Untuk pemain biasa di custom room, auto-mode timer di bawah menangani disconnect
                     // currentCustomRoomId TIDAK di-reset agar server bisa identifikasi room saat reconnect
