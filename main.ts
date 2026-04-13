@@ -2464,6 +2464,8 @@ class MatchmakingQueue {
     private pendingCustomRooms: Map<string, PendingCustomRoom> = new Map();
     // uid → { name, socket } — hanya pemain yang idle di home screen
     private onlineRegistry: Map<string, { name: string; socket: WebSocket }> = new Map();
+    // uid → socket aktif — untuk Single Active Session (satu akun = satu koneksi aktif)
+    private activeConnections: Map<string, WebSocket> = new Map();
     // inviteId → { fromUid, fromName, roomId, toUid }
     private pendingInvites: Map<string, { fromUid: string; fromName: string; roomId: string; toUid: string }> = new Map();
     // Party lobby untuk Main Online (ranked)
@@ -2855,6 +2857,30 @@ class MatchmakingQueue {
     // ============================
     // ONLINE REGISTRY (idle players di home screen)
     // ============================
+    // Daftarkan koneksi aktif — tendang koneksi lama jika ada (Single Active Session)
+    registerSession(userUid: string, socket: WebSocket) {
+        const existing = this.activeConnections.get(userUid);
+        if (existing && existing !== socket && existing.readyState === 1) {
+            console.log(`🔒 Single Session: tendang koneksi lama uid=${userUid}`);
+            try {
+                existing.send(JSON.stringify({
+                    type: 'SESSION_REPLACED',
+                    message: 'Akun ini dibuka di perangkat lain. Koneksi ini diputus.'
+                }));
+            } catch(_) {}
+            setTimeout(() => { try { existing.close(); } catch(_) {} }, 300);
+        }
+        this.activeConnections.set(userUid, socket);
+    }
+
+    unregisterSession(userUid: string, socket: WebSocket) {
+        // Hanya hapus jika socket yang terdaftar adalah socket ini
+        // (mencegah koneksi baru menghapus dirinya sendiri saat koneksi lama di-cleanup)
+        if (this.activeConnections.get(userUid) === socket) {
+            this.activeConnections.delete(userUid);
+        }
+    }
+
     registerOnline(userUid: string, name: string, socket: WebSocket) {
         this.onlineRegistry.set(userUid, { name, socket });
     }
@@ -3073,6 +3099,8 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         // Ini mencegah JOIN_MATCHMAKING dari TCP buffer lama (socket lama Railway)
                         // yang masuk antrian lalu langsung disconnect dalam 0ms.
                         if (socket.readyState !== 1) break;
+                        // Single Active Session: tendang koneksi lama jika uid sama
+                        if (data.userUid) matchmaking.registerSession(data.userUid, socket);
                         currentPlayer = {
                             id: `player_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
                             name: sanitizeName(data.playerName) || `Player_${Math.floor(Math.random()*9999)}`,
@@ -3307,6 +3335,8 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             const crResult = matchmaking.createPendingCustomRoom(sanitizedName, data.userUid, data.role, socket);
                             currentCustomRoomId = crResult.roomId;
                             isCustomRoomSpectator = data.role === 'penonton';
+                            // Single Active Session: tendang koneksi lama jika uid sama
+                            matchmaking.registerSession(data.userUid, socket);
                             if (data.role === 'pemain' && crResult.hostPlayerId) {
                                 currentPlayer = { id: crResult.hostPlayerId, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
                             } else if (data.role === 'penonton') {
@@ -3496,6 +3526,8 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         // Client kirim ini saat ada di home screen (idle)
                         if (data.userUid && data.playerName) {
                             const sanitizedName = sanitizeName(data.playerName) || 'Player';
+                            // Single Active Session: tendang koneksi lama jika uid sama
+                            matchmaking.registerSession(data.userUid, socket);
                             matchmaking.registerOnline(data.userUid, sanitizedName, socket);
                             if (!currentPlayer) {
                                 // Simpan identitas dasar agar onclose bisa cleanup
@@ -3620,6 +3652,8 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
         socket.onclose = () => {
             clearInterval(pingInterval);
             console.log(`🔌 Disconnected: ${currentPlayer?.name || 'unknown'}`);
+            // Single Active Session: hapus dari activeConnections saat disconnect
+            if (currentPlayer?.userUid) matchmaking.unregisterSession(currentPlayer.userUid, socket);
 
             if (currentCustomRoomId) {
                 const pendingRoom = matchmaking.getPendingCustomRoom(currentCustomRoomId);
