@@ -1719,6 +1719,7 @@ class GameEngine {
         // Jangan cleanup jika masih ada spectator yang belum pergi
         if (this._spectatorLeft === false) return false;
 
+        // Cleanup jika semua pemain manusia sudah pergi (termasuk kasus 0 manusia = semua bot)
         if (leftCount >= humans.length) {
             this.cleanupMatch();
             return true; // sinyal ke MatchmakingQueue untuk set status 'finished'
@@ -1733,11 +1734,12 @@ class GameEngine {
         this.spectatorSockets = [];
         this.spectatorUserUids = [];
 
-        // Periksa apakah semua pemain manusia juga sudah pergi
+        // Periksa apakah semua pemain manusia juga sudah pergi (atau memang tidak ada)
         const humans = this.gs.players.filter(p => !p.isBot);
         const leftCount = humans.filter(p => p.leftMatch).length;
         console.log(`🚪 Spectator keluar (${leftCount}/${humans.length} pemain manusia sudah pergi)`);
 
+        // Cleanup jika semua pemain manusia sudah pergi (termasuk kasus 0 manusia = semua bot)
         if (leftCount >= humans.length) {
             this.cleanupMatch();
             return true;
@@ -2329,8 +2331,13 @@ class MatchmakingQueue {
             return false;
         }
 
-        // Bersihkan flag leftMatch agar tidak salah di-cleanup
-        gamePlayer.leftMatch = false;
+        // Tolak rejoin jika pemain sudah sengaja menekan "Kembali ke Home" (LEAVE_MATCH).
+        // Ini mencegah pemain kembali ke pertandingan setelah refresh browser.
+        // Untuk custom room: berlaku permanen. Untuk ranked biasa: sama.
+        if (gamePlayer.leftMatch) {
+            console.log(`🚫 REJOIN DITOLAK: ${gamePlayer.name} sudah meninggalkan pertandingan secara eksplisit (leftMatch=true)`);
+            return false;
+        }
 
         room.gameEngine.updatePlayerSocket(playerId, socket);
         const rp = room.players.find(p => p.id === playerId);
