@@ -871,25 +871,22 @@ class GameEngine {
         this._spectatorLeft = false; // spectator aktif, belum pergi
     }
     // Timer grace period reconnect spectator (agar refresh tidak langsung cleanup)
-    private _spectatorReconnectTimer?: number;
+    _spectatorReconnectTimer?: number;
 
     removeSpectator(socket: WebSocket, userUid?: string) {
         this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket);
         // JANGAN hapus spectatorUserUids dulu — beri grace period 10 detik agar
         // spectator yang hanya refresh bisa reconnect via rejoinAsSpectator.
-        // spectatorUserUids baru dihapus jika tidak reconnect dalam 10 detik.
 
         if (this.spectatorSockets.length === 0 && this._spectatorLeft === false) {
             console.log(`👁️ Spectator socket disconnect — grace period 10s sebelum cleanup`);
-            // Batalkan timer lama jika ada (misal disconnect 2x cepat)
             if (this._spectatorReconnectTimer) {
                 clearTimeout(this._spectatorReconnectTimer);
                 this._spectatorReconnectTimer = undefined;
             }
             this._spectatorReconnectTimer = setTimeout(() => {
                 this._spectatorReconnectTimer = undefined;
-                // Cek lagi: jika spectator sudah reconnect (_spectatorLeft kembali false
-                // dan spectatorSockets sudah terisi), batalkan cleanup
+                // Cek lagi: jika spectator sudah reconnect, batalkan cleanup
                 if (this.spectatorSockets.length > 0) {
                     console.log(`👁️ Spectator sudah reconnect — cleanup dibatalkan`);
                     return;
@@ -1754,7 +1751,7 @@ class GameEngine {
         // Cleanup jika semua pemain manusia sudah pergi (termasuk kasus 0 manusia = semua bot)
         if (leftCount >= humans.length) {
             this.cleanupMatch();
-            return true; // sinyal ke MatchmakingQueue untuk set status 'finished'
+            return true;
         }
         return false;
     }
@@ -2365,7 +2362,6 @@ class MatchmakingQueue {
 
         // Tolak rejoin jika pemain sudah sengaja menekan "Kembali ke Home" (LEAVE_MATCH).
         // Ini mencegah pemain kembali ke pertandingan setelah refresh browser.
-        // Untuk custom room: berlaku permanen. Untuk ranked biasa: sama.
         if (gamePlayer.leftMatch) {
             console.log(`🚫 REJOIN DITOLAK: ${gamePlayer.name} sudah meninggalkan pertandingan secara eksplisit (leftMatch=true)`);
             return false;
@@ -2453,7 +2449,7 @@ class MatchmakingQueue {
             console.log(`👁️ Grace period dibatalkan — spectator ${userUid} reconnect`);
         }
         room.gameEngine.spectatorSockets.push(socket);
-        // Reset _spectatorLeft agar cleanup logic berjalan benar
+        // Reset _spectatorLeft agar logika cleanup berjalan benar
         room.gameEngine._spectatorLeft = false;
         return true;
     }
@@ -2464,8 +2460,6 @@ class MatchmakingQueue {
     private pendingCustomRooms: Map<string, PendingCustomRoom> = new Map();
     // uid → { name, socket } — hanya pemain yang idle di home screen
     private onlineRegistry: Map<string, { name: string; socket: WebSocket }> = new Map();
-    // uid → socket aktif — untuk Single Active Session (satu akun = satu koneksi aktif)
-    private activeConnections: Map<string, WebSocket> = new Map();
     // inviteId → { fromUid, fromName, roomId, toUid }
     private pendingInvites: Map<string, { fromUid: string; fromName: string; roomId: string; toUid: string }> = new Map();
     // Party lobby untuk Main Online (ranked)
@@ -2857,30 +2851,6 @@ class MatchmakingQueue {
     // ============================
     // ONLINE REGISTRY (idle players di home screen)
     // ============================
-    // Daftarkan koneksi aktif — tendang koneksi lama jika ada (Single Active Session)
-    registerSession(userUid: string, socket: WebSocket) {
-        const existing = this.activeConnections.get(userUid);
-        if (existing && existing !== socket && existing.readyState === 1) {
-            console.log(`🔒 Single Session: tendang koneksi lama uid=${userUid}`);
-            try {
-                existing.send(JSON.stringify({
-                    type: 'SESSION_REPLACED',
-                    message: 'Akun ini dibuka di perangkat lain. Koneksi ini diputus.'
-                }));
-            } catch(_) {}
-            setTimeout(() => { try { existing.close(); } catch(_) {} }, 300);
-        }
-        this.activeConnections.set(userUid, socket);
-    }
-
-    unregisterSession(userUid: string, socket: WebSocket) {
-        // Hanya hapus jika socket yang terdaftar adalah socket ini
-        // (mencegah koneksi baru menghapus dirinya sendiri saat koneksi lama di-cleanup)
-        if (this.activeConnections.get(userUid) === socket) {
-            this.activeConnections.delete(userUid);
-        }
-    }
-
     registerOnline(userUid: string, name: string, socket: WebSocket) {
         this.onlineRegistry.set(userUid, { name, socket });
     }
@@ -3099,8 +3069,6 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         // Ini mencegah JOIN_MATCHMAKING dari TCP buffer lama (socket lama Railway)
                         // yang masuk antrian lalu langsung disconnect dalam 0ms.
                         if (socket.readyState !== 1) break;
-                        // Single Active Session: tendang koneksi lama jika uid sama
-                        if (data.userUid) matchmaking.registerSession(data.userUid, socket);
                         currentPlayer = {
                             id: `player_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
                             name: sanitizeName(data.playerName) || `Player_${Math.floor(Math.random()*9999)}`,
@@ -3335,8 +3303,6 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             const crResult = matchmaking.createPendingCustomRoom(sanitizedName, data.userUid, data.role, socket);
                             currentCustomRoomId = crResult.roomId;
                             isCustomRoomSpectator = data.role === 'penonton';
-                            // Single Active Session: tendang koneksi lama jika uid sama
-                            matchmaking.registerSession(data.userUid, socket);
                             if (data.role === 'pemain' && crResult.hostPlayerId) {
                                 currentPlayer = { id: crResult.hostPlayerId, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
                             } else if (data.role === 'penonton') {
@@ -3526,8 +3492,6 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         // Client kirim ini saat ada di home screen (idle)
                         if (data.userUid && data.playerName) {
                             const sanitizedName = sanitizeName(data.playerName) || 'Player';
-                            // Single Active Session: tendang koneksi lama jika uid sama
-                            matchmaking.registerSession(data.userUid, socket);
                             matchmaking.registerOnline(data.userUid, sanitizedName, socket);
                             if (!currentPlayer) {
                                 // Simpan identitas dasar agar onclose bisa cleanup
@@ -3652,8 +3616,6 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
         socket.onclose = () => {
             clearInterval(pingInterval);
             console.log(`🔌 Disconnected: ${currentPlayer?.name || 'unknown'}`);
-            // Single Active Session: hapus dari activeConnections saat disconnect
-            if (currentPlayer?.userUid) matchmaking.unregisterSession(currentPlayer.userUid, socket);
 
             if (currentCustomRoomId) {
                 const pendingRoom = matchmaking.getPendingCustomRoom(currentCustomRoomId);
@@ -3665,33 +3627,24 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                 } else if (activeRoom?.gameEngine) {
                     // Game sudah berjalan
                     if (isCustomRoomSpectator) {
-                        console.log(`👁️ Spectator DISCONNECT (koneksi putus): room ${currentCustomRoomId}, uid: ${currentPlayer?.userUid || "unknown"} → uid dibersihkan`);
-                        // Spectator disconnect: cukup hapus dari gameEngine
-                        // removeSpectator kini juga trigger cleanupMatch jika semua player sudah leftMatch
+                        console.log(`👁️ Spectator DISCONNECT (koneksi putus): room ${currentCustomRoomId}, uid: ${currentPlayer?.userUid || "unknown"} → grace period 10s`);
+                        // removeSpectator kini pakai grace period 10s agar refresh bisa reconnect
                         activeRoom.gameEngine.removeSpectator(socket, currentPlayer?.userUid || '');
-                        // [FIX] Reset state socket spectator — mereka tidak bisa reconnect,
-                        // jadi tidak perlu dipertahankan. Ini mencegah blocking CREATE_CUSTOM_ROOM baru.
+                        // [FIX] Reset state socket spectator — mencegah blocking CREATE_CUSTOM_ROOM baru.
                         currentCustomRoomId = null;
                         isCustomRoomSpectator = false;
                     } else if (currentPlayer && activeRoom.gameEngine.isCustomRoom) {
-                        // Pemain custom room disconnect (bukan klik tombol) — tandai leftMatch
-                        // setelah delay 30 detik jika tidak reconnect.
-                        // Ini menangani kasus: semua pemain disconnect tanpa klik tombol kembali,
-                        // spectator sudah pergi → match tidak stuck selamanya.
+                        // Pemain custom room disconnect — tandai leftMatch setelah 30s jika tidak reconnect
                         const _capturedRoomId = currentCustomRoomId;
                         const _capturedPlayerId = currentPlayer.id;
                         setTimeout(() => {
                             const _r = matchmaking.getRoom(_capturedRoomId!);
                             if (!_r || _r.gameEngine.gs.gameOver) return;
                             const _gp = _r.gameEngine.getPlayerById(_capturedPlayerId);
-                            // Hanya lanjutkan jika player masih disconnect (autoMode = true, belum reconnect)
                             if (!_gp || !_gp.autoMode || _gp.leftMatch) return;
-                            console.log(`⏱️ Custom room: ${_gp.name} tidak reconnect setelah 30s → tandai leftMatch`);
+                            console.log(`⏱️ Custom room: ${_gp.name} tidak reconnect 30s → tandai leftMatch`);
                             const allLeft = _r.gameEngine.markPlayerLeft(_capturedPlayerId);
-                            if (allLeft) {
-                                _r.status = 'finished';
-                                _r.finishedAt = Date.now();
-                            }
+                            if (allLeft) { _r.status = 'finished'; _r.finishedAt = Date.now(); }
                         }, 30000);
                     }
                     // Untuk pemain biasa di custom room, auto-mode timer di bawah menangani disconnect
