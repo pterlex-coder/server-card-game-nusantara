@@ -2868,7 +2868,11 @@ class MatchmakingQueue {
                     message: 'Akun ini dibuka di perangkat lain. Koneksi ini diputus.'
                 }));
             } catch(_) {}
-            setTimeout(() => { try { existing.close(); } catch(_) {} }, 300);
+            // [FIX] Delay lebih panjang (800ms) agar client punya waktu menerima SESSION_REPLACED
+            // dan null-kan semua handler-nya sebelum socket ditutup paksa.
+            // Jika terlalu cepat (300ms), onclose terpanggil sebelum handler di-null
+            // → client reconnect → server tendang lagi → loop infinite stuck di "Memuat..."
+            setTimeout(() => { try { existing.close(); } catch(_) {} }, 800);
         }
         this.activeConnections.set(userUid, socket);
     }
