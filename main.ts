@@ -870,21 +870,40 @@ class GameEngine {
         if (userUid && !this.spectatorUserUids.includes(userUid)) this.spectatorUserUids.push(userUid);
         this._spectatorLeft = false; // spectator aktif, belum pergi
     }
+    // Timer grace period reconnect spectator (agar refresh tidak langsung cleanup)
+    private _spectatorReconnectTimer?: number;
+
     removeSpectator(socket: WebSocket, userUid?: string) {
         this.spectatorSockets = this.spectatorSockets.filter(s => s !== socket);
-        if (userUid) this.spectatorUserUids = this.spectatorUserUids.filter(u => u !== userUid);
+        // JANGAN hapus spectatorUserUids dulu — beri grace period 10 detik agar
+        // spectator yang hanya refresh bisa reconnect via rejoinAsSpectator.
+        // spectatorUserUids baru dihapus jika tidak reconnect dalam 10 detik.
 
-        // Jika spectator disconnect (putus koneksi) dan spectatorSockets kosong,
-        // tandai sebagai "spectator sudah pergi" agar cleanup bisa berjalan
-        // jika semua pemain manusia juga sudah leftMatch.
         if (this.spectatorSockets.length === 0 && this._spectatorLeft === false) {
-            this._spectatorLeft = true;
-            const humans = this.gs.players.filter(p => !p.isBot);
-            const leftCount = humans.filter(p => p.leftMatch).length;
-            console.log(`👁️ Spectator socket habis (disconnect). leftCount=${leftCount}/${humans.length}`);
-            if (leftCount >= humans.length) {
-                this.cleanupMatch();
+            console.log(`👁️ Spectator socket disconnect — grace period 10s sebelum cleanup`);
+            // Batalkan timer lama jika ada (misal disconnect 2x cepat)
+            if (this._spectatorReconnectTimer) {
+                clearTimeout(this._spectatorReconnectTimer);
+                this._spectatorReconnectTimer = undefined;
             }
+            this._spectatorReconnectTimer = setTimeout(() => {
+                this._spectatorReconnectTimer = undefined;
+                // Cek lagi: jika spectator sudah reconnect (_spectatorLeft kembali false
+                // dan spectatorSockets sudah terisi), batalkan cleanup
+                if (this.spectatorSockets.length > 0) {
+                    console.log(`👁️ Spectator sudah reconnect — cleanup dibatalkan`);
+                    return;
+                }
+                // Spectator benar-benar pergi — hapus uid dan tandai left
+                if (userUid) this.spectatorUserUids = this.spectatorUserUids.filter(u => u !== userUid);
+                this._spectatorLeft = true;
+                const humans = this.gs.players.filter(p => !p.isBot);
+                const leftCount = humans.filter(p => p.leftMatch).length;
+                console.log(`👁️ Spectator tidak reconnect (grace habis). leftCount=${leftCount}/${humans.length}`);
+                if (leftCount >= humans.length) {
+                    this.cleanupMatch();
+                }
+            }, 10000) as unknown as number;
         }
     }
 
@@ -2427,7 +2446,15 @@ class MatchmakingQueue {
         const room = this.rooms.get(roomId);
         if (!room || (room.status !== 'playing' && room.status !== 'starting')) return false;
         if (!room.gameEngine.spectatorUserUids.includes(userUid)) return false;
+        // Batalkan grace period timer jika masih berjalan (spectator reconnect tepat waktu)
+        if (room.gameEngine._spectatorReconnectTimer) {
+            clearTimeout(room.gameEngine._spectatorReconnectTimer);
+            room.gameEngine._spectatorReconnectTimer = undefined;
+            console.log(`👁️ Grace period dibatalkan — spectator ${userUid} reconnect`);
+        }
         room.gameEngine.spectatorSockets.push(socket);
+        // Reset _spectatorLeft agar cleanup logic berjalan benar
+        room.gameEngine._spectatorLeft = false;
         return true;
     }
 
@@ -3282,6 +3309,9 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             isCustomRoomSpectator = data.role === 'penonton';
                             if (data.role === 'pemain' && crResult.hostPlayerId) {
                                 currentPlayer = { id: crResult.hostPlayerId, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
+                            } else if (data.role === 'penonton') {
+                                // Simpan identitas spectator host agar uid tidak "unknown" saat disconnect
+                                currentPlayer = { id: data.userUid, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
                             }
                             socket.send(JSON.stringify({ type: 'CUSTOM_ROOM_CREATED', roomId: crResult.roomId }));
                         }
