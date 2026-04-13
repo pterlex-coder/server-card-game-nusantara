@@ -2857,36 +2857,28 @@ class MatchmakingQueue {
     // ============================
     // ONLINE REGISTRY (idle players di home screen)
     // ============================
-    // Cek apakah uid sudah punya sesi aktif — dipakai sebelum registerSession
-    // Mengembalikan true jika akun sedang login di device lain (BLOKIR device baru)
+    // [FIX SERVER 1] isSessionActive: cek apakah uid sudah login di device lain
     isSessionActive(userUid: string, socket: WebSocket): boolean {
         const existing = this.activeConnections.get(userUid);
         return !!(existing && existing !== socket && existing.readyState === WebSocket.OPEN);
     }
 
-    // Daftarkan koneksi aktif (Single Active Session — hanya 1 device per akun)
-    // Panggil ini HANYA setelah isSessionActive() mengembalikan false
+    // registerSession: daftarkan sesi baru (panggil SETELAH isSessionActive = false)
     registerSession(userUid: string, socket: WebSocket) {
         this.activeConnections.set(userUid, socket);
         console.log(`✅ Session registered: uid=${userUid}`);
     }
 
-    // Kirim notifikasi ke device lama bahwa ada yang coba login dari device baru (lalu tolak device baru)
+    // notifyActiveSession: kirim LOGIN_BLOCKED ke device baru + LOGIN_ATTEMPT_ELSEWHERE ke device lama
     notifyActiveSession(userUid: string, newSocket: WebSocket) {
         const existing = this.activeConnections.get(userUid);
         if (existing && existing.readyState === WebSocket.OPEN) {
-            try {
-                existing.send(JSON.stringify({
-                    type: 'LOGIN_ATTEMPT_ELSEWHERE',
-                    message: 'Ada yang mencoba login ke akun kamu dari perangkat lain.'
-                }));
-            } catch(_) {}
+            try { existing.send(JSON.stringify({ type: 'LOGIN_ATTEMPT_ELSEWHERE' })); } catch(_) {}
         }
-        // Kirim penolakan ke device baru
         try {
             newSocket.send(JSON.stringify({
                 type: 'LOGIN_BLOCKED',
-                message: 'Akun ini sedang login di perangkat lain. Logout dari perangkat tersebut terlebih dahulu.'
+                message: 'Akun ini sedang login di perangkat lain.'
             }));
         } catch(_) {}
     }
@@ -3117,10 +3109,10 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         // Ini mencegah JOIN_MATCHMAKING dari TCP buffer lama (socket lama Railway)
                         // yang masuk antrian lalu langsung disconnect dalam 0ms.
                         if (socket.readyState !== 1) break;
-                        // Single Active Session: blokir jika akun sedang login di device lain
+                        // [FIX SERVER 2] Blokir jika akun sudah aktif di device lain
                         if (data.userUid && matchmaking.isSessionActive(data.userUid, socket)) {
                             matchmaking.notifyActiveSession(data.userUid, socket);
-                            break; // Tolak — jangan proses lebih lanjut
+                            break;
                         }
                         if (data.userUid) matchmaking.registerSession(data.userUid, socket);
                         currentPlayer = {
@@ -3351,7 +3343,6 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             }
                         }
                         if (data.userUid && matchmaking.isSessionActive(data.userUid, socket)) {
-                            // Akun sedang aktif di device lain — blokir
                             matchmaking.notifyActiveSession(data.userUid, socket);
                         } else if (currentCustomRoomId || (data.userUid && matchmaking.findRoomByUserUid(data.userUid))) {
                             socket.send(JSON.stringify({ type: 'ERROR', message: 'Sudah berada di room lain. Keluar dulu.' }));
@@ -3360,7 +3351,7 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                             const crResult = matchmaking.createPendingCustomRoom(sanitizedName, data.userUid, data.role, socket);
                             currentCustomRoomId = crResult.roomId;
                             isCustomRoomSpectator = data.role === 'penonton';
-                            // Single Active Session: lolos cek isSessionActive, langsung register
+                            // [FIX SERVER 3] Lolos cek isSessionActive, daftarkan sesi
                             matchmaking.registerSession(data.userUid, socket);
                             if (data.role === 'pemain' && crResult.hostPlayerId) {
                                 currentPlayer = { id: crResult.hostPlayerId, name: sanitizedName, socket, joinTime: Date.now(), userUid: data.userUid };
@@ -3551,10 +3542,10 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                         // Client kirim ini saat ada di home screen (idle)
                         if (data.userUid && data.playerName) {
                             const sanitizedName = sanitizeName(data.playerName) || 'Player';
-                            // Single Active Session: blokir jika akun sedang aktif di device lain
+                            // [FIX SERVER 4] Blokir jika akun sudah aktif di device lain
                             if (matchmaking.isSessionActive(data.userUid, socket)) {
                                 matchmaking.notifyActiveSession(data.userUid, socket);
-                                break; // Tolak login baru
+                                break;
                             }
                             matchmaking.registerSession(data.userUid, socket);
                             matchmaking.registerOnline(data.userUid, sanitizedName, socket);
