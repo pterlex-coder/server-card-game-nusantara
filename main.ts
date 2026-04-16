@@ -548,8 +548,8 @@ const DRAW_RATES: Record<number, Record<string, number>> = {
         rare: 11, uncommon: 10, uncommonplus: 9, commonplus: 8, common: 7, mythic: 2
     },
     9: { // Level 9 - Legendary dominan (14%)
-        legendary: 14, epic: 14, rareplus: 13, rarestar: 11,
-        rare: 10, uncommon: 9, uncommonplus: 8, commonplus: 7, common: 6, mythic: 8
+        legendary: 17, epic: 13, rareplus: 12, rarestar: 11,
+        rare: 10, uncommon: 9, uncommonplus: 8, commonplus: 7, common: 6, mythic: 7
     },
     10: { // Level 10 - Mythic dominan (20%)
         mythic: 20, legendary: 17, epic: 14, rareplus: 11,
