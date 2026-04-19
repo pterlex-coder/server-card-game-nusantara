@@ -85,7 +85,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Kepulauan Riau", cards: [
         { name: "Bauksit & Timah",            type: "SDA Unggulan",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Fort de Kock",       type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Bukit Kursi",       type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perikanan Laut",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Belah Bubung",         type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Badik Tumbuk Lada",          type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
