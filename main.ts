@@ -1702,7 +1702,8 @@ class GameEngine {
 
         this.broadcastToAll({
             type: 'GAME_OVER',
-            players: this.gs.players.map(p => ({ id: p.id, name: p.name, rank: p.rank, hand: p.hand, isBot: p.isBot }))
+            players: this.gs.players.map(p => ({ id: p.id, name: p.name, rank: p.rank, hand: p.hand, isBot: p.isBot })),
+            isCustomRoom: this.isCustomRoom
         });
 
         // Rekam statistik provinsi per-match (fire-and-forget)
@@ -3232,7 +3233,8 @@ Deno.serve({ port: parseInt(Deno.env.get("PORT") || "8000") }, async (req) => {
                                             type: 'GAME_OVER',
                                             players: finishedRoom.gameEngine.gs.players.map(p => ({
                                                 id: p.id, name: p.name, rank: p.rank, hand: p.hand, isBot: p.isBot
-                                            }))
+                                            })),
+                                            isCustomRoom: finishedRoom.gameEngine.isCustomRoom
                                         })); } catch(_) {}
                                         // Kirim SAVE_STATS_CLIENT agar client menyimpan stats sebagai fallback
                                         // (server sudah mencoba simpan saat game selesai, tapi socket lama mungkin sudah putus)
