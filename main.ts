@@ -1922,10 +1922,10 @@ class GameEngine {
             player.autoModeTimerId = undefined;
             if (!player.autoMode || player.hasPlayed || player.winner || this.gs.gameOver) return;
 
-            // Auto Phase 1
+            // Auto Phase 1 - random card
             if (this.gs.phase === 1 && this.gs.phase1Player === player.id && !player.hasPlayed) {
                 if (player.hand.length > 0) {
-                    const card = [...player.hand].sort((a, b) => a.power - b.power)[0];
+                    const card = player.hand[Math.floor(Math.random() * player.hand.length)];
                     this.broadcastLog(`👤 AUTO: ${player.name} menjatuhkan ${card.name}`);
                     this.handlePlayCardInternal(player, card);
                 }
@@ -1939,21 +1939,21 @@ class GameEngine {
                 return;
             }
 
-            // Auto Phase 2 - Play Card
+            // Auto Phase 2 - Play Card (random dari kartu matching)
             if (this.gs.phase === 2 && !player.hasPlayed && !player.mustDraw && !player.mustForcePick) {
                 const matching = player.hand.filter(c => c.province === this.gs.currentProvince);
                 if (matching.length > 0) {
-                    const card = matching.sort((a, b) => a.power - b.power)[0];
+                    const card = matching[Math.floor(Math.random() * matching.length)];
                     this.broadcastLog(`👤 AUTO: ${player.name} menjatuhkan ${card.name}`);
                     this.handlePlayCardInternal(player, card);
                 }
                 return;
             }
 
-            // Auto Force Pick
+            // Auto Force Pick - random dari topCard
             if (this.gs.phase === 2 && player.mustForcePick && !player.hasPlayed && this.gs.forcePickMode) {
                 if (this.gs.topCard.length > 0) {
-                    const card = [...this.gs.topCard].sort((a, b) => b.power - a.power)[0];
+                    const card = this.gs.topCard[Math.floor(Math.random() * this.gs.topCard.length)];
                     this.broadcastLog(`👤 AUTO: ${player.name} Mengambil kartu: ${card.name}`);
                     this.handleForcePickCardInternal(player, card.id);
                 }
