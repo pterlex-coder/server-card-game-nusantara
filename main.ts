@@ -37,7 +37,7 @@ interface RoundHistory { round: number; plays: RoundPlay[]; }
 const ALL_PROVINCES = [
     { name: "Aceh", cards: [
         { name: "Kopi Gayo",                  type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Masjid Raya Baiturrahman",   type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Masjid Raya Baiturrahman",   type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertanian Kopi",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumoh Aceh",                 type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Rencong",                    type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -49,7 +49,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sumatera Utara", cards: [
         { name: "Karet & Kelapa Sawit",       type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Istana Maimun",              type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Istana Maimun",              type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perkebunan Sawit",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Bolon",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Piso Gaja Dompak",           type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -61,7 +61,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sumatera Barat", cards: [
         { name: "Gambir & Kulit Manis",       type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Jam Gadang",                 type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Jam Gadang",                 type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perdagangan Rempah",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Gadang",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Karih",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -73,7 +73,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Riau", cards: [
         { name: "Minyak Bumi",                type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Istana Siak",                type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Istana Siak",                type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Minyak",        type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Selaso Jatuh Kembar",  type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Pedang Jenawi",              type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -85,7 +85,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Kepulauan Riau", cards: [
         { name: "Bauksit & Timah",            type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Bukit Kursi",       type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Bukit Kursi",       type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perikanan Laut",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Belah Bubung",         type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Badik Tumbuk Lada",          type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -97,7 +97,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Jambi", cards: [
         { name: "Batubara & Karet",           type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Candi Muaro Jambi",          type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Candi Muaro Jambi",          type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perkebunan Karet",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Kajang Leko",          type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris Siginjai",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -109,7 +109,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Bengkulu", cards: [
         { name: "Batubara & Emas",            type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Marlborough",        type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Marlborough",        type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Batu Bara",     type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Bubungan Lima",        type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Rudus",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -121,7 +121,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sumatera Selatan", cards: [
         { name: "Minyak & Gas Bumi",          type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Jembatan Ampera",            type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Jembatan Ampera",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Minyak",        type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Limas",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Tombak Trisula",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -133,7 +133,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Bangka Belitung", cards: [
         { name: "Timah",                      type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Kuto Panji",         type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Kuto Panji",         type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Timah",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Rakit",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Siwar",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -145,7 +145,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Lampung", cards: [
         { name: "Kopi Robusta Lampung",       type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Menara Siger",               type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Menara Siger",               type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perkebunan Kopi",            type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Nuwou Sesat",          type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Terapang",                   type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -169,7 +169,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Jawa Barat", cards: [
         { name: "Teh & Kina",                 type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Keraton Kasepuhan Cirebon",  type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Keraton Kasepuhan Cirebon",  type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perkebunan Teh",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Kasepuhan",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Kujang",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -181,7 +181,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Banten", cards: [
         { name: "Baja & Industri",            type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Masjid Agung Banten",        type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Masjid Agung Banten",        type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Industri Baja",              type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Baduy",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Golok Ciomas",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -193,7 +193,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Jawa Tengah", cards: [
         { name: "Lahan Pertanian (Padi)",            type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Candi Borobudur",            type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Candi Borobudur",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Industri Tekstil",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Joglo",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -205,7 +205,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "DI Yogyakarta", cards: [
         { name: "Material Vulkanik (Pasir dan Batuan)", type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Keraton Yogyakarta",         type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Keraton Yogyakarta",         type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Industri Kerajinan",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Bangsal Kencono",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris Yogyakarta",           type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -217,7 +217,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Jawa Timur", cards: [
         { name: "Garam & Tembakau",           type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Candi Penataran",            type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Candi Penataran",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Industri Garam",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Situbondo",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Clurit",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -229,7 +229,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Bali", cards: [
         { name: "Kopi Kintamani",             type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Pura Besakih",               type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Pura Besakih",               type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pariwisata Budaya",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Gapura Candi Bentar",  type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris Bali",                 type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -241,7 +241,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Nusa Tenggara Barat", cards: [
         { name: "Mutiara Lombok",             type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Istana Dalam Loka",          type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Istana Dalam Loka",          type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Budidaya Mutiara",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Dalam Loka",           type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris NTB",                  type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -253,7 +253,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Nusa Tenggara Timur", cards: [
         { name: "Kopi Flores & Cendana",      type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Portugis Solor",     type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Portugis Solor",     type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Peternakan Sapi",            type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Musalaki",             type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Sundu",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -265,7 +265,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Kalimantan Barat", cards: [
         { name: "Bauksit & Emas",             type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Keraton Kadriyah Pontianak", type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Keraton Kadriyah Pontianak", type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Bauksit",       type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Panjang",              type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Mandau",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -277,7 +277,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Kalimantan Tengah", cards: [
         { name: "Rotan & Kayu Ulin",          type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Istana Kuning Sampit",       type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Istana Kuning Sampit",       type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Kehutanan & Rotan",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Betang",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Mandau Kalteng",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -289,7 +289,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Kalimantan Selatan", cards: [
         { name: "Intan & Batubara",           type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Masjid Sultan Suriansyah",   type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Masjid Sultan Suriansyah",   type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Intan",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Bubungan Tinggi",      type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris Banjar",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -301,7 +301,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Kalimantan Timur", cards: [
         { name: "Minyak & Gas Kaltim",        type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Keraton Kutai Kartanegara",  type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Keraton Kutai Kartanegara",  type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Migas",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Lamin",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Mandau Kaltim",              type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -313,7 +313,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Kalimantan Utara", cards: [
         { name: "Gas Alam & Kelapa Sawit",    type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Tarakan",            type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Tarakan",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perikanan & Kehutanan",      type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Baloy",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Mandau Kalut",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -325,7 +325,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sulawesi Utara", cards: [
         { name: "Kelapa & Cengkeh",           type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Moraya",             type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Moraya",             type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perikanan Laut",             type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Walewangko",           type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris Sulut",                type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -337,7 +337,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Gorontalo", cards: [
         { name: "Jagung & Ikan Tuna",         type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Otanaha",            type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Otanaha",            type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertanian Jagung",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Dulohupa",             type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Wamilo",                     type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -349,7 +349,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sulawesi Tengah", cards: [
         { name: "Nikel & Emas Sulteng",       type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Masjid Tua Luwuk",           type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Masjid Tua Luwuk",           type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Nikel",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Tambi",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Pasatimpo",                  type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -361,7 +361,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sulawesi Barat", cards: [
         { name: "Kakao & Kelapa Sulbar",      type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Istana Malaweg",             type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Istana Malaweg",             type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perkebunan Kakao",           type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Boyang",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Badik Sulbar",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -373,7 +373,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sulawesi Selatan", cards: [
         { name: "Nikel & Besi Sulsel",        type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Rotterdam",          type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Rotterdam",          type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Nikel",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Tongkonan",            type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Badik",                      type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -385,7 +385,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Sulawesi Tenggara", cards: [
         { name: "Nikel & Aspal Buton",        type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Keraton Buton",      type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Keraton Buton",      type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Aspal",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Istana Buton",         type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Keris Sultra",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -397,7 +397,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Maluku", cards: [
         { name: "Pala & Cengkeh Maluku",      type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Belgica Banda",      type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Belgica Banda",      type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perkebunan Rempah",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Baileo",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Parang Salawaku",            type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -409,7 +409,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Maluku Utara", cards: [
         { name: "Nikel & Cengkeh Malut",      type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng Tolukko Ternate",    type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng Tolukko Ternate",    type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Nikel",         type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Sasadu",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Parang Malut",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -421,7 +421,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Papua", cards: [
         { name: "Emas & Tembaga Freeport",    type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Tugu MacArthur Jayapura",    type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Tugu MacArthur Jayapura",    type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertambangan Emas",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Honai",                type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Pisau Belati Papua",         type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -433,7 +433,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Papua Barat", cards: [
         { name: "Gas Alam & Ikan Laut",       type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Tugu Jepang Manokwari",      type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Tugu Jepang Manokwari",      type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perikanan & Migas",          type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Mod Aki Aksa",         type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Pisau Pabar",                type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -457,7 +457,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Papua Tengah", cards: [
         { name: "Emas & Hasil Hutan Pateng",  type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Kampung Tua Mosandurei",      type: "Bangunan Bersejarah", rarity: "legendary", power: 9 },
+        { name: "Kampung Tua Mosandurei",     type: "Tempat Bersejarah", rarity: "legendary", power: 9 },
         { name: "Pertanian & Kehutanan",      type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Karapao",              type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Pisau Pateng",               type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -469,7 +469,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Papua Pegunungan", cards: [
         { name: "Hasil Hutan & Kopi",         type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Lembah Baliem",               type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Lembah Baliem",              type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Pertanian Pegunungan",       type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Honai Pegunungan",     type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Pisau Peg",                  type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
@@ -481,7 +481,7 @@ const ALL_PROVINCES = [
     ]},
     { name: "Papua Barat Daya", cards: [
         { name: "Ikan & Mutiara Sorong",      type: "Sumber Daya Alam",        rarity: "mythic",      power: 10 },
-        { name: "Benteng VOC Sorong",         type: "Tempat Bersejarah", rarity: "legendary",   power: 9 },
+        { name: "Benteng VOC Sorong",         type: "Bangunan Bersejarah", rarity: "legendary",   power: 9 },
         { name: "Perikanan & Pariwisata",     type: "Sektor Ekonomi",      rarity: "rareplus",    power: 7 },
         { name: "Rumah Kambik",               type: "Rumah Adat",          rarity: "epic",        power: 8 },
         { name: "Pisau Pabarday",             type: "Senjata Tradisional", rarity: "rarestar",    power: 6 },
