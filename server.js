@@ -1781,18 +1781,39 @@ class MatchmakingQueue {
         players.forEach(p => gameEngine.addPlayer({ id: p.id, name: p.name, isBot: false, socket: p.socket, userUid: p.userUid }));
         players.forEach(p => { try { p.socket.send(JSON.stringify({ type: 'PROVINCES_SELECTED', provinces: selectedProvinces, mandatory: MANDATORY_PROVINCE, roomId, playerId: p.id })); } catch(e) {} });
         let botLevel = 1;
+        const playerRankMap = {};
         if (botCount > 0) {
             try {
                 const rankResults = await Promise.all(players.map(p => p.userUid ? fbRead(`/users/${p.userUid}/rankData`) : Promise.resolve(null)));
                 for (let i = 0; i < rankResults.length; i++) {
                     const rd = rankResults[i];
                     if (!rd?.rankName) continue;
+                    playerRankMap[players[i].name] = rd.rankName;
                     if (rd.rankName.startsWith("Platinum")) { botLevel = 3; break; }
                     if ((rd.rankName.startsWith("Gold") || rd.rankName.startsWith("Diamond")) && botLevel < 2) botLevel = 2;
                 }
             } catch (e) { console.warn("⚠️ Gagal fetch rank untuk bot level:", e); }
         }
-        for (let i = 0; i < botCount; i++) gameEngine.addBot(GameEngine.pickBotName(), botLevel);
+        const botLevelLabel = botLevel === 3 ? 'Level 3 (Platinum)' : botLevel === 2 ? 'Level 2 (Gold/Diamond)' : 'Level 1 (Bronze/Silver)';
+        const botLevelAlasan = botLevel === 3
+            ? `karena ada pemain berrank Platinum`
+            : botLevel === 2
+                ? `karena ada pemain berrank Gold/Diamond`
+                : `karena semua pemain berrank Bronze/Silver atau tidak terdeteksi`;
+        const addedBots = [];
+        for (let i = 0; i < botCount; i++) {
+            const bName = GameEngine.pickBotName();
+            gameEngine.addBot(bName, botLevel);
+            addedBots.push(bName);
+        }
+        if (botCount > 0) {
+            console.log(`🤖 BOT DITAMBAHKAN — Room: ${roomId}`);
+            console.log(`   📌 Jumlah bot    : ${botCount}`);
+            console.log(`   🎯 Level bot      : ${botLevelLabel}`);
+            console.log(`   💡 Alasan level  : ${botLevelAlasan}`);
+            console.log(`   🏅 Rank pemain   : ${Object.entries(playerRankMap).map(([n,r]) => `${n}=${r}`).join(', ') || '(tidak terdeteksi)'}`);
+            console.log(`   🤖 Nama bot      : ${addedBots.join(', ')}`);
+        }
         const room = { id: roomId, players, bots: botCount, status: 'starting', gameEngine, createdAt: Date.now() };
         this.rooms.set(roomId, room);
         gameEngine.onGameOver = () => { room.status = 'finished'; room.finishedAt = Date.now(); console.log(`🏁 Room ${roomId} selesai`); };
@@ -2005,7 +2026,18 @@ class MatchmakingQueue {
             const selectedProvinces = [MANDATORY_PROVINCE, ...await pickWeightedProvinces()];
             gameEngine.setSelectedProvinces(selectedProvinces);
             room.players.forEach(p => gameEngine.addPlayer({ id: p.id, name: p.name, isBot: false, socket: p.socket, userUid: p.userUid }));
-            Object.values(room.botSlots).forEach(b => gameEngine.addBot(`Bot Lv${b.level}`, b.level));
+            const customBotNames = [];
+            Object.values(room.botSlots).forEach(b => {
+                const bName = `Bot Lv${b.level}`;
+                gameEngine.addBot(bName, b.level);
+                customBotNames.push(`${bName} (Level ${b.level})`);
+            });
+            if (customBotNames.length > 0) {
+                console.log(`🤖 BOT CUSTOM ROOM — Room: ${roomId}`);
+                console.log(`   📌 Jumlah bot  : ${customBotNames.length}`);
+                console.log(`   🤖 Daftar bot  : ${customBotNames.join(', ')}`);
+                console.log(`   👥 Pemain      : ${room.players.map(p => p.name).join(', ')}`);
+            }
             const gameRoom = {
                 id: roomId,
                 players: room.players.map(p => ({ id: p.id, name: p.name, socket: p.socket, joinTime: Date.now(), userUid: p.userUid })),
