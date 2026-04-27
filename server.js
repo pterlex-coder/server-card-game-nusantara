@@ -1,5 +1,6 @@
 // ================================================
 // CARD GAME NUSANTARA - FULL SERVER v2
+// judul skripsi : PENGEMBANGAN MEDIA WEBSITE CARD GAME NUSANTARA MATERI DAERAHKU KEBANGGAANKU PADA MATA PELAJARAN IPAS KELAS V SDN 19 PANGKALPINANG
 // server.js - Converted from Deno (main.ts) to Node.js
 // ================================================
 
@@ -1372,7 +1373,12 @@ class GameEngine {
             player.statsSaved = true;
             const _p = player;
             savePlayerStats(_p.userUid, _p.name, _p.rank).then(ok => {
-                if (!ok) {
+                if (ok) {
+                    // Kirim STATS_SAVED agar client bisa tambah EXP sesuai posisi
+                    if (_p.socket && _p.socket.readyState === WebSocket.OPEN) {
+                        try { _p.socket.send(JSON.stringify({ type: 'STATS_SAVED', rank: _p.rank })); } catch (_) {}
+                    }
+                } else {
                     _p.statsSaved = false;
                     if (_p.socket && _p.socket.readyState === WebSocket.OPEN) {
                         try { _p.socket.send(JSON.stringify({ type: 'SAVE_STATS_CLIENT', rank: _p.rank })); } catch (_) {}
